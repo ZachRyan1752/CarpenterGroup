@@ -1,0 +1,9 @@
+pyproject.toml
+CarpenterLabPython.egg-info/PKG-INFO
+CarpenterLabPython.egg-info/SOURCES.txt
+CarpenterLabPython.egg-info/dependency_links.txt
+CarpenterLabPython.egg-info/top_level.txt
+Uncorrected/ExampleCode.py
+Uncorrected/LabViewFunctions.py
+Uncorrected/MicroscopeController.py
+Uncorrected/Program.py
