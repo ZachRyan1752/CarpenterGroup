@@ -1,0 +1,10 @@
+How to start a project:
+0) Download python libraries from GitHub
+1) In The Libs folder, run InitializeProject.py AFTER updating relevant project information at the bottom of the file
+2) Run InitalizeProject.py
+2a) Move Libs folder into your main project directory
+3) If you do not yet have calibration data: 
+3a) collect gain calibration videos (see benchling) into the Calibration/GainCalibration folder
+3b) Collect a flat field image at the OD you intend to use along with relevant laser information in the Calibration/BeamProfile folder
+4) If you have calibration data:
+4a) Place it in the Calibration/CalibrationData folder
