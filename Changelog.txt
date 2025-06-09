@@ -1,6 +1,11 @@
-Version 2.1.0
+Version 2.1.0 (2025_06_09)
 GeneratesCMOSCalibrationData.py:
   - Implemented further optimizations, tested using a supercomputer
+  - Removed extraneous code
+  - GainCalibrationFromMovies:
+    - Removed extraneous code
+    - Moved away from np.vstack to creating a list of arrays, then stitching them into a numpy movie to help save memory
+
 
 
 Version 2.0.0
