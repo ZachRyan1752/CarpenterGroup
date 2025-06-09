@@ -31,6 +31,7 @@
 - Added the GenerateProject.py program for generating file directories
 
   
-Markdown cheatsheet: 
+Markdown cheatsheets: 
+
 https://github.com/im-luka/markdown-cheatsheet
 https://github.com/im-luka/markdown-cheatsheet?tab=readme-ov-file#user-content-fn-1-3cd6da4860b03d7ee151fb7ff7186453
