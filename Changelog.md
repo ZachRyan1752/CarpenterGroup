@@ -6,6 +6,7 @@
     - Removed extraneous code
     - Moved away from np.vstack to creating a list of arrays, then stitching them into a numpy movie to help save memory
     - Implemented bug fixes
+    - Removed max_workers from concurrent.futures.ProcessThreadPool, as the default should be sufficient, and *too* many workers can actually slow the system from overhead.
 
 ## General:
   - Removed broken glass
