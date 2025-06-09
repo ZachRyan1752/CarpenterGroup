@@ -7,6 +7,8 @@
     - Moved away from np.vstack to creating a list of arrays, then stitching them into a numpy movie to help save memory
     - Implemented bug fixes
     - Removed max_workers from concurrent.futures.ProcessThreadPool, as the default should be sufficient, and *too* many workers can actually slow the system from overhead.
+    - Fixed accidentally subtracting illumination frames from themselves, instead of the dark frame from itself (to remove the offset)
+    
 
 ## Added SinglePixelFit.py
   - Goal: Crop data by any arbitrary ammount to produce smaller or differently shaped videos
