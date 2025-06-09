@@ -8,6 +8,9 @@
     - Implemented bug fixes
     - Removed max_workers from concurrent.futures.ProcessThreadPool, as the default should be sufficient, and *too* many workers can actually slow the system from overhead.
 
+## Added SinglePixelFit.py
+  - Goal: Crop data by any arbitrary ammount to produce smaller or differently shaped videos
+
 ## General:
   - Removed broken glass
 
