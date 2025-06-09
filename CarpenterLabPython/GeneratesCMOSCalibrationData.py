@@ -18,8 +18,16 @@ import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 import concurrent
 import time
+import matplotlib.pyplot as plt
 
 # defs
+def LoadMovieAndStitchMovie(MoviePath, MovieStitched):
+    Movie = tifffile.imread(MoviePath)
+    for Frames in Movie:
+        MovieStitched.append(Frames)
+        
+    return MovieStitched
+
 def LinearFitByColumn(x,XData,YData):
     Slope, Intercept, R2, P, STD_ERR = linregress(XData,YData)
     return x, Slope, Intercept, R2
@@ -70,14 +78,16 @@ def GetMovieAveragesFromFilePaths(FolderPath,Paths):
     return AverageMovieArray, MovieShape
 
 def StitchMoviesAndReturnAverageAndVarianceArrays(FolderPath,Paths,PathIndexes,AverageValueArray,MovieShape):
-    StitchedMovie = np.empty((0,MovieShape[1],MovieShape[2]))
+    StitchedMovie = []
     IndexIndex = 0
+    
     for Indicies in PathIndexes:
-        MovieData = tifffile.imread(FolderPath+"Calibration/GainCalibration/"+Paths[Indicies])
-        StitchedMovie = np.vstack((StitchedMovie, MovieData))
-
+        StitchedMovie = LoadMovieAndStitchMovie(FolderPath+"Calibration/GainCalibration/"+Paths[Indicies],StitchedMovie)
         IndexIndex += 1
         print("Stitching Movie %s out of %s" % (IndexIndex, len(PathIndexes)))
+        
+    StitchedMovie = np.array(StitchedMovie)
+
     
     StitchedMovieAverage = np.average(StitchedMovie, axis = 0)
     StitchedMovieVariance = np.var(StitchedMovie, axis = 0)
@@ -99,15 +109,16 @@ def FrameABSubtractionWrapper(args):
     return FrameBAdjusted
 
 def StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndABRatio(FolderPath,Paths,PathIndexes,AverageValueArray,MovieShape,BackgroundAverage):
-    StitchedMovie = np.empty((0,MovieShape[1],MovieShape[2]))
-    IndexIndex = 0
-    for Indicies in PathIndexes:
-        MovieData = tifffile.imread(FolderPath+"Calibration/GainCalibration/"+Paths[Indicies])
-        StitchedMovie = np.vstack((StitchedMovie, MovieData))
+    StitchedMovie = []
+    IndexIndex = 0    
 
+    for Indicies in PathIndexes:
+        StitchedMovie = LoadMovieAndStitchMovie(FolderPath+"Calibration/GainCalibration/"+Paths[Indicies],StitchedMovie)
+        
         IndexIndex += 1
         print("Stitching Movie %s out of %s" % (IndexIndex, len(PathIndexes)))
         
+    StitchedMovie = np.array(StitchedMovie)
     StitchedMovie = StitchedMovie - BackgroundAverage
     MovieShape = np.shape(StitchedMovie)
     print(MovieShape,PathIndexes)
@@ -145,26 +156,12 @@ def StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndAB
 
     StitchedMovieAB = np.array(StitchedMovieAB)
     print("Stitched Array Shape: %s %s %s" % np.shape(StitchedMovieAB))
-    #StitchedMovieAB = np.empty((0,MovieShape[1],MovieShape[2]))
-    #FrameCounter = 0
-    #for Frames in StitchedMovie:
-    #    if FrameCounter == 0:
-    #        FrameA = Frames
-    #        FrameAAverage = np.average(FrameA)
-    #    else:
-    #        RatioAB = FrameAAverage / np.average(Frames)
-    #        FrameBAdjusted = Frames * RatioAB
-    #        FrameBAdjusted = np.expand_dims(FrameBAdjusted, axis = 0)
-    #        StitchedMovieAB = np.vstack((StitchedMovieAB, FrameBAdjusted))
-    #       
-    #
-    #    FrameCounter += 1
-    #    print("Adjusting Frame %s out of %s" % (FrameCounter,MovieShape[0]))
 
     StitchedMovieAverage = np.average(StitchedMovieAB, axis = 0)
     StitchedMovieVariance = np.var(StitchedMovieAB, axis = 0)
     
     return StitchedMovieAverage, StitchedMovieVariance
+
 
 def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     StartTime = time.time()
@@ -187,53 +184,71 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     MinimumAverageValue = np.min(AverageMovieValueArray)
     IndexArray = []
     for Average in AverageMovieValueArray:
-        if Average > MinimumAverageValue * 0.8 and MinimumAverageValue * 1.2 > Average :
+        if Average > MinimumAverageValue * 0.95 and MinimumAverageValue * 1.05 > Average :
             IndexArray.append(DarkImageIndex)
         DarkImageIndex += 1
 
     print("Getting Dark Movie")
     DarkFrameAverage, DarkFrameVariance = StitchMoviesAndReturnAverageAndVarianceArrays(FolderPath,MoviePaths,IndexArray,AverageMovieValueArray,MovieShape)
+    
+    AverageFrameOverIlluminationLevels = []
+    VarianceFrameOverIlluminationLevels = []
+
+    AverageFrameOverIlluminationLevels.append(np.array(DarkFrameAverage))
+    VarianceFrameOverIlluminationLevels.append(np.array(DarkFrameVariance))
 
     RemovedCount = 0
-    for Indexes in IndexArray:
-        Indexes = Indexes - RemovedCount ## For every index removed, the relative remaining indexes should be removed by that much
-        AverageMovieValueArray.remove(AverageMovieValueArray[Indexes])
-        MoviePaths.remove(MoviePaths[Indexes])
+    for Indexes in IndexArray[::-1]:
+        print(AverageMovieValueArray[Indexes],MoviePaths[Indexes],MinimumAverageValue) 
+        AverageMovieValueArray.pop(Indexes)
+        MoviePaths.pop(Indexes)
         RemovedCount += 1
 
     print("Getting Movie Averages and Variances")
     print(AverageMovieValueArray)
 
     
-    AverageFrameOverIlluminationLevels = []
-    VarianceFrameOverIlluminationLevels = []
+
     while len(AverageMovieValueArray) > 0:
         MinimumAverageValue = np.min(AverageMovieValueArray)
         IndexArray = []
         ImageIndex = 0
         for Average in AverageMovieValueArray:
-            if Average > MinimumAverageValue * 0.8 and MinimumAverageValue * 1.2 > Average :
+            if Average > MinimumAverageValue * 0.95 and MinimumAverageValue * 1.05 > Average :
+                print(Average, MinimumAverageValue, ImageIndex)
                 IndexArray.append(ImageIndex)
-                #AverageMovieValueArray.remove(AverageMovieValueArray[ImageIndex])
-                #MoviePaths.remove(MoviePaths[ImageIndex])
-            else:
-                ImageIndex += 1
+            ImageIndex += 1
 
         FrameAverage, FrameVariance = StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndABRatio(FolderPath,MoviePaths,IndexArray,AverageMovieValueArray,MovieShape,DarkFrameAverage)
 
         RemovedCount = 0
-        for Indexes in IndexArray:
-            Indexes = Indexes - RemovedCount ## For every index removed, the relative remaining indexes should be removed by that much
-            AverageMovieValueArray.remove(AverageMovieValueArray[Indexes])
-            MoviePaths.remove(MoviePaths[Indexes])
+        for Indexes in IndexArray[::-1]:
+            print(AverageMovieValueArray[Indexes],MoviePaths[Indexes],MinimumAverageValue) 
+            AverageMovieValueArray.pop(Indexes)
+            MoviePaths.pop(Indexes)
             RemovedCount += 1
         
-        AverageFrameOverIlluminationLevels.append(FrameAverage)
-        VarianceFrameOverIlluminationLevels.append(FrameVariance)
+        AverageFrameOverIlluminationLevels.append(np.array(FrameAverage-FrameAverage))
+        VarianceFrameOverIlluminationLevels.append(np.array(FrameVariance))
 
 
-    AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
-    VarianceFrameOverIlluminationLevels = np.array(VarianceFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
+
+    AverageFrameOverIlluminationLevels2 = np.empty(np.shape(MovieShape))
+    for Frames in AverageFrameOverIlluminationLevels:
+        AverageFrameOverIlluminationLevels2 = np.vstack((AverageFrameOverIlluminationLevels2, Frames))
+
+    VarianceFrameOverIlluminationLevels2 = np.empty(np.shape(MovieShape))
+    for Frames in VarianceFrameOverIlluminationLevels:
+        VarianceFrameOverIlluminationLevels2 = np.vstack((VarianceFrameOverIlluminationLevels2, Frames))
+
+    AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels2
+    VarianceFrameOverIlluminationLevels = VarianceFrameOverIlluminationLevels2
+    
+    
+    #AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
+
+    #AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
+    #VarianceFrameOverIlluminationLevels = np.array(VarianceFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
 
     print("Average and Variance Array Shapes")
     print(np.shape(AverageFrameOverIlluminationLevels),np.shape(VarianceFrameOverIlluminationLevels))
@@ -250,8 +265,8 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     
     ### index changed here
     while Iterator1 < np.shape(AverageFrameOverIlluminationLevels)[1]: ## Len - 1 converts to index or not
-        AverageData = AverageFrameOverIlluminationLevels[0:IlluminationLevels,Iterator1] ## Preslicing the arrays, for (theoretically) faster code execution
-        VarianceData = VarianceFrameOverIlluminationLevels[0:IlluminationLevels,Iterator1]
+        AverageData = AverageFrameOverIlluminationLevels[0:IlluminationLevels+1,Iterator1] ## Preslicing the arrays, for (theoretically) faster code execution
+        VarianceData = VarianceFrameOverIlluminationLevels[0:IlluminationLevels+1,Iterator1]
 
         AverageDataToProcessPool.append(AverageData)
         VarianceDataToProcessPool.append(VarianceData)
@@ -269,7 +284,7 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
             AverageData = AverageDataToProcessPool[ArrayCounter]
             VarianceData = VarianceDataToProcessPool[ArrayCounter]
 
-            ProcessData = [ArrayCounter, IlluminationLevels, AverageData, VarianceData]
+            ProcessData = [ArrayCounter, IlluminationLevels, VarianceData, AverageData] ## Variance and average have been swapped
             DataPool.append(ProcessData)
             ArrayCounter += 1
 
@@ -284,18 +299,6 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
             BigDataArray.append([Column, RowSlope, RowIntercept, RowR2])
             FinishedProcessCounter += 1
             print("Finished Column %s out of %s" % (FinishedProcessCounter, MovieShape[1]))
-
-
-        #Iterator1 = 0   
-        #for data in AverageDataToProcessPool:
-        #    Column = Iterator1
-        #    AverageData = AverageDataToProcessPool[Iterator1]
-        #    VarianceData = VarianceDataToProcessPool[Iterator1]
-
-        #    Column, RowSlope, RowIntercept, RowR2 = FitColumnLinear(Iterator1, IlluminationLevels, AverageData, VarianceData)
-        #    BigDataArray.append([Column, RowSlope, RowIntercept, RowR2])
-
-        #    Iterator1 += 1
 
     ## Sorting the data
     ## This will be used when I implement asynchronous code execution
@@ -321,11 +324,19 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     InterceptImage = np.array(ColumnIntercept)
     R2Image = np.array(ColumnR2)
 
+    VarianceFrame = np.array(VarianceFrameOverIlluminationLevels[0])
+
+    VxG = VarianceFrame * SlopeImage
     VarianceFrameOverIlluminationLevels = VarianceFrameOverIlluminationLevels.astype(np.float32)
     AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels.astype(np.float32)
+    print(np.shape(VarianceFrameOverIlluminationLevels),np.shape(AverageFrameOverIlluminationLevels))
+
     SlopeImage = SlopeImage.astype(np.float32)
     InterceptImage = InterceptImage.astype(np.float32)
     R2Image = R2Image.astype(np.float32)
+
+    tifffile.imwrite(ExtractedDataPath+"Variance.tif",VarianceFrame.astype(np.float32))
+    tifffile.imwrite(ExtractedDataPath+"ElectronReadoutNoise.tif",VxG.astype(np.float32))
 
     tifffile.imwrite(ExtractedDataPath+"GainPixelVariance.tif",VarianceFrameOverIlluminationLevels)
     tifffile.imwrite(ExtractedDataPath+"GainPixelAverage.tif",AverageFrameOverIlluminationLevels)
