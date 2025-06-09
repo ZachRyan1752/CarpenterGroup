@@ -8,7 +8,7 @@
     - Implemented bug fixes
 
 ## General:
-  - Checked for presence of glass
+  - Removed broken glass
 
 
 
