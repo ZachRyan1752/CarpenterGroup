@@ -31,6 +31,7 @@ def Exponential_1N(x, a, b, c):
     y = a * b**x + c
     return y
 
+
 ## Two Dimensional:
 def twoD_Gaussian(xy, amplitude, xo, yo, sigma_x, sigma_y, theta, offset): # Taken from: https://stackoverflow.com/questions/21566379/fitting-a-2d-gaussian-function-using-scipy-optimize-curve-fit-valueerror-and-m
     x, y = xy

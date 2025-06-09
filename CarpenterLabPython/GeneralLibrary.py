@@ -12,6 +12,7 @@ from xml.dom import minidom
 import cv2
 import math
 from bs4 import BeautifulSoup
+import csv
 
 # Defs
 def GetFormattedYMDHSAP():
@@ -119,4 +120,24 @@ def WriteCsv2D_Data(Data,Path,Filename,Header):
             CsvFile.write("\n")        
     
     CsvFile.close()
-    
+
+def ImportAllCsvFromDirectory(DataFolder):
+    ## Import all data from a directory contained in .csv files and return them as a singular array
+    ## Ordered as [[Peak 1 Data], [Peak 2 Data], ...]
+    ## Where [Peak 1 Data] is ordered as [Frame #, Peak Height, Peak X, Peak Y, amplitude, xo, yo, sigma_x, sigma_y, theta, offset, R2, Area sum 5x5, Photoelectrons Per Second]
+    CSVFiles = ScanForFilesInPathByTag(DataFolder, ".csv")
+    DataArrayOutput = []
+    for DataPath in CSVFiles:
+        with open(DataFolder + DataPath, mode = 'r') as File:
+            DataArray = csv.reader(File)
+            for Lines in DataArray:
+                LinesOut = [DataFolder, DataPath, *Lines]
+                DataArrayOutput.append(LinesOut)
+
+    return DataArrayOutput
+
+def FormatXMLString(String):
+    String = String.replace("\n  ","")
+    String = String.replace("\n ","")
+
+    return String

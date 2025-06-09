@@ -16,6 +16,8 @@ import ImageProcessing as IP
 import lxml.etree as etree
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
+import concurrent
+import time
 
 # defs
 def LinearFitByColumn(x,XData,YData):
@@ -49,173 +51,292 @@ def FitColumnLinear(Column, LengthOfMovieArray, AverageData, VarianceData):
 
     return Column, RowSlope, RowIntercept, RowR2
 
+def FitColumnLinearWrapper(args):
+    Column, RowSlope, RowIntercept, RowR2 = FitColumnLinear(args[0], args[1], args[2], args[3])
 
-def GainCalibrationFromMovies(FolderPath):
+    return Column, RowSlope, RowIntercept, RowR2
+
+def GetMovieAveragesFromFilePaths(FolderPath,Paths):
+    LengthOfPaths = len(Paths)
+    AverageMovieArray = []
+    MovieIndex = 0
+    for Path in Paths:
+        MovieData = tifffile.imread(FolderPath+"Calibration/GainCalibration/"+Path)
+        MovieAverage = np.average(MovieData)
+        MovieShape = np.shape(MovieData)
+        AverageMovieArray.append(MovieAverage)
+        MovieIndex += 1
+        print("Averaging Movie %s out of %s" % (MovieIndex, LengthOfPaths))
+    return AverageMovieArray, MovieShape
+
+def StitchMoviesAndReturnAverageAndVarianceArrays(FolderPath,Paths,PathIndexes,AverageValueArray,MovieShape):
+    StitchedMovie = np.empty((0,MovieShape[1],MovieShape[2]))
+    IndexIndex = 0
+    for Indicies in PathIndexes:
+        MovieData = tifffile.imread(FolderPath+"Calibration/GainCalibration/"+Paths[Indicies])
+        StitchedMovie = np.vstack((StitchedMovie, MovieData))
+
+        IndexIndex += 1
+        print("Stitching Movie %s out of %s" % (IndexIndex, len(PathIndexes)))
+    
+    StitchedMovieAverage = np.average(StitchedMovie, axis = 0)
+    StitchedMovieVariance = np.var(StitchedMovie, axis = 0)
+    
+    return StitchedMovieAverage, StitchedMovieVariance
+
+def FrameABSubtraction(Frames, FrameAAverage, FrameCounter, MovieShape):
+    RatioAB = FrameAAverage / np.average(Frames)
+    FrameBAdjusted = Frames * RatioAB
+    #FrameBAdjusted = np.expand_dims(FrameBAdjusted, axis = 0)
+    print("Starting Frame %s out of %s" % (FrameCounter + 1, MovieShape[0])) ## Technically it is already done at this point
+
+    return FrameBAdjusted
+
+def FrameABSubtractionWrapper(args):
+    ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
+    FrameBAdjusted = FrameABSubtraction(args[0],args[1],args[2],args[3])
+
+    return FrameBAdjusted
+
+def StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndABRatio(FolderPath,Paths,PathIndexes,AverageValueArray,MovieShape,BackgroundAverage):
+    StitchedMovie = np.empty((0,MovieShape[1],MovieShape[2]))
+    IndexIndex = 0
+    for Indicies in PathIndexes:
+        MovieData = tifffile.imread(FolderPath+"Calibration/GainCalibration/"+Paths[Indicies])
+        StitchedMovie = np.vstack((StitchedMovie, MovieData))
+
+        IndexIndex += 1
+        print("Stitching Movie %s out of %s" % (IndexIndex, len(PathIndexes)))
+        
+    StitchedMovie = StitchedMovie - BackgroundAverage
+    MovieShape = np.shape(StitchedMovie)
+    print(MovieShape,PathIndexes)
+    time.sleep(2)
+    ## Get the ratio of frames and adjust them to be the same mean
+    ## Subtract Frame B from Frame A
+    ## Get the variance of the noise
+    #StitchedMovieAB = np.empty((0,MovieShape[1],MovieShape[2]))
+    StitchedMovieAB = []
+    with concurrent.futures.ProcessPoolExecutor(max_workers=61) as executor: 
+        ## This is the hard limit for workers on windows: 
+        ## See: https://github.com/python/cpython/issues/71090
+        ## See: https://github.com/psf/black/issues/564
+        FrameCounter = 0
+        DataPool = []
+        for Frames in StitchedMovie:
+            if FrameCounter == 0:
+                FrameA = Frames
+                FrameAAverage = np.average(FrameA)
+            else:
+                ProcessData = [Frames,FrameAAverage, FrameCounter, MovieShape]
+                DataPool.append(ProcessData)
+                #ThreadData = executor.map(FrameABSubtraction, Frames, FrameAAverage, FrameCounter, MovieShape) # .submit
+                #ThreadData = {executor.submit(FrameABSubtraction, Frame2, FrameAAverage, FrameCounter, MovieShape) for Frame2 in StitchedMovie}
+                #break
+            FrameCounter += 1
+
+        ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
+        ThreadReturnedData = executor.map(FrameABSubtractionWrapper, DataPool)
+        FinishedProcessCounter = 0
+        for FrameBAdjusted in ThreadReturnedData:  
+            StitchedMovieAB.append(FrameBAdjusted)
+            FinishedProcessCounter += 1
+            print("Finished AB Frame %s out of %s" % (FinishedProcessCounter, np.shape(StitchedMovie)[0]))
+
+    StitchedMovieAB = np.array(StitchedMovieAB)
+    print("Stitched Array Shape: %s %s %s" % np.shape(StitchedMovieAB))
+    #StitchedMovieAB = np.empty((0,MovieShape[1],MovieShape[2]))
+    #FrameCounter = 0
+    #for Frames in StitchedMovie:
+    #    if FrameCounter == 0:
+    #        FrameA = Frames
+    #        FrameAAverage = np.average(FrameA)
+    #    else:
+    #        RatioAB = FrameAAverage / np.average(Frames)
+    #        FrameBAdjusted = Frames * RatioAB
+    #        FrameBAdjusted = np.expand_dims(FrameBAdjusted, axis = 0)
+    #        StitchedMovieAB = np.vstack((StitchedMovieAB, FrameBAdjusted))
+    #       
+    #
+    #    FrameCounter += 1
+    #    print("Adjusting Frame %s out of %s" % (FrameCounter,MovieShape[0]))
+
+    StitchedMovieAverage = np.average(StitchedMovieAB, axis = 0)
+    StitchedMovieVariance = np.var(StitchedMovieAB, axis = 0)
+    
+    return StitchedMovieAverage, StitchedMovieVariance
+
+def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
+    StartTime = time.time()
     FolderPath = FolderPath.replace("\n  ","")
     FolderPath = FolderPath.replace("\n ","")
     ## Generate a image containing the gain at each individual pixel
     ## Procedure from:
     ## https://mirametrics.com/tech_note_ccdgain.php
+    ## Essentially the same as 2-frame calibration, but on a per-pixel basis, this removes one of the two offsets for the fitting
     DataPath = FolderPath + "Calibration/GainCalibration/"
     ExtractedDataPath = FolderPath + "Calibration/CalibrationData/"
     MoviePaths = GL.ScanForFilesInPathByTag(DataPath,".tif")
-    MovieDataArray = []
-    AverageMovieValueArray = []
 
-    for FilePath in MoviePaths:
-        MovieData = tifffile.imread(DataPath + FilePath)
-        MovieDataArray.append(MovieData)
-        CompleteMovieAverage = np.average(MovieData)
-        AverageMovieValueArray.append(CompleteMovieAverage)
 
-    MovieIndex1 = 0
-    NewMovieDataArray = []
-    for Movie in MovieDataArray:
-        MovieIndex2 = 0
-        MovieStacked = np.array(np.shape(Movie))
-        MovieStacked += Movie
-        for Movie2 in MovieDataArray:
-            if MovieIndex1 != MovieIndex2: ## If they are different movies
-                if AverageMovieValueArray[MovieIndex1] * 0.9 < AverageMovieValueArray[1] and AverageMovieValueArray[1] < AverageMovieValueArray[MovieIndex1] * 1.1:
-                    MovieStacked = np.vstack((MovieStacked,Movie2)) ## Append the two movies
-                    MovieDataArray.pop(MovieIndex2) ## Remove the compared movie
-            MovieIndex2 += 1
-        NewMovieDataArray = []
-        MovieIndex1 += 1
+    LengthMovieList = len(MoviePaths)
+    
+    AverageMovieValueArray, MovieShape = GetMovieAveragesFromFilePaths(FolderPath, MoviePaths)
 
-    del MovieDataArray ## Removing duplicate data
+    DarkImageIndex = 0
+    MinimumAverageValue = np.min(AverageMovieValueArray)
+    IndexArray = []
+    for Average in AverageMovieValueArray:
+        if Average > MinimumAverageValue * 0.8 and MinimumAverageValue * 1.2 > Average :
+            IndexArray.append(DarkImageIndex)
+        DarkImageIndex += 1
 
-    MovieDataArray = []
-    MovieDataArray = NewMovieDataArray
+    print("Getting Dark Movie")
+    DarkFrameAverage, DarkFrameVariance = StitchMoviesAndReturnAverageAndVarianceArrays(FolderPath,MoviePaths,IndexArray,AverageMovieValueArray,MovieShape)
 
-    del NewMovieDataArray ## Removing duplicate data
+    RemovedCount = 0
+    for Indexes in IndexArray:
+        Indexes = Indexes - RemovedCount ## For every index removed, the relative remaining indexes should be removed by that much
+        AverageMovieValueArray.remove(AverageMovieValueArray[Indexes])
+        MoviePaths.remove(MoviePaths[Indexes])
+        RemovedCount += 1
 
-    AverageMovieValueArray = []
-    for Movies in MovieDataArray:
-        CompleteMovieAverage = np.average(Movies)
-        AverageMovieValueArray.append(CompleteMovieAverage)
+    print("Getting Movie Averages and Variances")
+    print(AverageMovieValueArray)
 
-    DarkFrameIndex = np.where(np.min(AverageMovieValueArray) == AverageMovieValueArray) ## np.where retrurns an array filled with the positions where the condition is met
-    DarkFrameMovie = MovieDataArray[DarkFrameIndex[0][0]]
-    DarkFrameAverage = np.average(DarkFrameMovie, axis = 0)
-    MovieDataArray.pop(DarkFrameIndex[0][0])
-    AverageMovieValueArray.pop(DarkFrameIndex[0][0])
+    
+    AverageFrameOverIlluminationLevels = []
+    VarianceFrameOverIlluminationLevels = []
+    while len(AverageMovieValueArray) > 0:
+        MinimumAverageValue = np.min(AverageMovieValueArray)
+        IndexArray = []
+        ImageIndex = 0
+        for Average in AverageMovieValueArray:
+            if Average > MinimumAverageValue * 0.8 and MinimumAverageValue * 1.2 > Average :
+                IndexArray.append(ImageIndex)
+                #AverageMovieValueArray.remove(AverageMovieValueArray[ImageIndex])
+                #MoviePaths.remove(MoviePaths[ImageIndex])
+            else:
+                ImageIndex += 1
 
-    Looping = True
-    while Looping:
-        ## Subtract the background (dark image)
-        MoviesBackgroundSubtracted = []
-        for Movies in MovieDataArray:
-            MovieBackgroundSubtracted = []
-            for Frames in Movies:
-                FrameBackgroundSubtracted = Frames - DarkFrameAverage
-                MovieBackgroundSubtracted.append(FrameBackgroundSubtracted)
-            MoviesBackgroundSubtracted.append(MovieBackgroundSubtracted)
+        FrameAverage, FrameVariance = StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndABRatio(FolderPath,MoviePaths,IndexArray,AverageMovieValueArray,MovieShape,DarkFrameAverage)
 
-        ## Get the ratio of frames and adjust them to be the same mean
-        ## Subtract Frame B from Frame A
-        ## Get the variance of the noise
-        AverageFrameOverIlluminationLevels = []
-        VarianceFrameOverIlluminationLevels = []
-        for Movies in MoviesBackgroundSubtracted:
-            FrameA = Movies[0]
-            AdjustedFrameArray = []
-            for Frames in Movies:
-                RatioAB = np.average(FrameA) / np.average(Frames)
-                FrameBAdjusted = Frames * RatioAB
-                AdjustedFrameArray.append(FrameBAdjusted)
-                
-            AveragePixelFrame = np.average(AdjustedFrameArray, axis = 0)
-            VariancePixelFrame = np.var(AdjustedFrameArray, axis = 0)
-            
-            AverageFrameOverIlluminationLevels.append(AveragePixelFrame)
-            VarianceFrameOverIlluminationLevels.append(VariancePixelFrame)
+        RemovedCount = 0
+        for Indexes in IndexArray:
+            Indexes = Indexes - RemovedCount ## For every index removed, the relative remaining indexes should be removed by that much
+            AverageMovieValueArray.remove(AverageMovieValueArray[Indexes])
+            MoviePaths.remove(MoviePaths[Indexes])
+            RemovedCount += 1
         
+        AverageFrameOverIlluminationLevels.append(FrameAverage)
+        VarianceFrameOverIlluminationLevels.append(FrameVariance)
+
+
+    AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
+    VarianceFrameOverIlluminationLevels = np.array(VarianceFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
+
+    print("Average and Variance Array Shapes")
+    print(np.shape(AverageFrameOverIlluminationLevels),np.shape(VarianceFrameOverIlluminationLevels))
+    #time.sleep(5)
+    Iterator1 = 0
+    ColumnSlope = []
+    ColumnIntercept = []
+    ColumnR2 = []
         
-        ## Collecting some variables before clearing memory
-        LengthOfMovieArray = len(MovieDataArray)-1
+    BigDataArray = []
 
+    AverageDataToProcessPool = []
+    VarianceDataToProcessPool = []
+    
+    ### index changed here
+    while Iterator1 < np.shape(AverageFrameOverIlluminationLevels)[1]: ## Len - 1 converts to index or not
+        AverageData = AverageFrameOverIlluminationLevels[0:IlluminationLevels,Iterator1] ## Preslicing the arrays, for (theoretically) faster code execution
+        VarianceData = VarianceFrameOverIlluminationLevels[0:IlluminationLevels,Iterator1]
+
+        AverageDataToProcessPool.append(AverageData)
+        VarianceDataToProcessPool.append(VarianceData)
+        print("Working on Column Number: %s" % Iterator1)
+        Iterator1 += 1
         
-        ## Explicitely clearing memory
-        del MovieDataArray
-        del MoviesBackgroundSubtracted
+    with concurrent.futures.ProcessPoolExecutor(max_workers=61) as executor: 
+        ## This is the hard limit for workers on windows: 
+        ## See: https://github.com/python/cpython/issues/71090
+        ## See: https://github.com/psf/black/issues/564
+        ArrayCounter = 0
+        DataPool = []
+        for Data in AverageDataToProcessPool:
+            Column = ArrayCounter
+            AverageData = AverageDataToProcessPool[ArrayCounter]
+            VarianceData = VarianceDataToProcessPool[ArrayCounter]
 
+            ProcessData = [ArrayCounter, IlluminationLevels, AverageData, VarianceData]
+            DataPool.append(ProcessData)
+            ArrayCounter += 1
 
-        gc.collect()
-
-        AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
-        VarianceFrameOverIlluminationLevels = np.array(VarianceFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
-        
-        Iterator1 = 0
-        ColumnSlope = []
-        ColumnIntercept = []
-        ColumnR2 = []
-        
-        BigDataArray = []
-
-        AverageDataToProcessPool = []
-        VarianceDataToProcessPool = []
-        ### index changed here
-        while Iterator1 < np.shape(AverageFrameOverIlluminationLevels)[1]: ## Len - 1 converts to index or not
-            AverageData = AverageFrameOverIlluminationLevels[0:LengthOfMovieArray,Iterator1] ## Preslicing the arrays, for (theoretically) faster code execution
-            VarianceData = VarianceFrameOverIlluminationLevels[0:LengthOfMovieArray,Iterator1]
-
-            AverageDataToProcessPool.append(AverageData)
-            VarianceDataToProcessPool.append(VarianceData)
-            print("Working on Column Number: %s" % Iterator1)
-            Iterator1 += 1
-        
-        Iterator1 = 0   
-        for data in AverageDataToProcessPool:
-            Column = Iterator1
-            AverageData = AverageDataToProcessPool[Iterator1]
-            VarianceData = VarianceDataToProcessPool[Iterator1]
-
-            Column, RowSlope, RowIntercept, RowR2 = FitColumnLinear(Iterator1, LengthOfMovieArray, AverageData, VarianceData)
+        ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
+        ThreadReturnedData = executor.map(FitColumnLinearWrapper, DataPool)
+        FinishedProcessCounter = 0
+        for Data in ThreadReturnedData:  
+            Column = Data[0] 
+            RowSlope = Data[1]
+            RowIntercept = Data[2]
+            RowR2 = Data[3]
             BigDataArray.append([Column, RowSlope, RowIntercept, RowR2])
+            FinishedProcessCounter += 1
+            print("Finished Column %s out of %s" % (FinishedProcessCounter, MovieShape[1]))
 
-            Iterator1 += 1
 
-        ## Sorting the data
-        ## This will be used when I implement asynchronous code execution
-        Iterator2 = 0
-        for elements in BigDataArray:
-            ColumnSlope.append(0)
-            ColumnIntercept.append(0)
-            ColumnR2.append(0)
-            print(Iterator2)
-            Iterator2 += 1
+        #Iterator1 = 0   
+        #for data in AverageDataToProcessPool:
+        #    Column = Iterator1
+        #    AverageData = AverageDataToProcessPool[Iterator1]
+        #    VarianceData = VarianceDataToProcessPool[Iterator1]
 
-        Iterator3 = 0
-        for elements in BigDataArray:
-            Index = elements[0] 
-            ColumnSlope[Index] = elements[1]
-            ColumnIntercept[Index] = elements[2]
-            ColumnR2[Index] = elements[3]
-            print(Iterator3)
-            Iterator3 += 1
+        #    Column, RowSlope, RowIntercept, RowR2 = FitColumnLinear(Iterator1, IlluminationLevels, AverageData, VarianceData)
+        #    BigDataArray.append([Column, RowSlope, RowIntercept, RowR2])
 
-        SlopeImage = np.array(ColumnSlope)
-        InterceptImage = np.array(ColumnIntercept)
-        R2Image = np.array(ColumnR2)
+        #    Iterator1 += 1
 
-        VarianceFrameOverIlluminationLevels = VarianceFrameOverIlluminationLevels.astype(np.float32)
-        AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels.astype(np.float32)
-        SlopeImage = SlopeImage.astype(np.float32)
-        InterceptImage = InterceptImage.astype(np.float32)
-        R2Image = R2Image.astype(np.float32)
-        #print(np.shape(VarianceFrameOverIlluminationLevels),np.shape(AverageFrameOverIlluminationLevels))
-        #print("Spacer")
-        #print(np.shape(SlopeImage),np.shape(InterceptImage),np.shape(R2Image))
+    ## Sorting the data
+    ## This will be used when I implement asynchronous code execution
 
-        tifffile.imwrite(ExtractedDataPath+"GainPixelVariance.tif",VarianceFrameOverIlluminationLevels)
-        tifffile.imwrite(ExtractedDataPath+"GainPixelAverage.tif",AverageFrameOverIlluminationLevels)
-        tifffile.imwrite(ExtractedDataPath+"GainPixelSlope.tif",SlopeImage)
-        tifffile.imwrite(ExtractedDataPath+"GainPixelIntercept.tif",InterceptImage)
-        tifffile.imwrite(ExtractedDataPath+"GainPixelR2.tif",R2Image)
+    Iterator2 = 0
+    for elements in BigDataArray:
+        ColumnSlope.append(0)
+        ColumnIntercept.append(0)
+        ColumnR2.append(0)
+        print(Iterator2)
+        Iterator2 += 1
+
+    Iterator3 = 0
+    for elements in BigDataArray:
+        Index = elements[0] 
+        ColumnSlope[Index] = elements[1]
+        ColumnIntercept[Index] = elements[2]
+        ColumnR2[Index] = elements[3]
+        print(Iterator3)
+        Iterator3 += 1
+
+    SlopeImage = np.array(ColumnSlope)
+    InterceptImage = np.array(ColumnIntercept)
+    R2Image = np.array(ColumnR2)
+
+    VarianceFrameOverIlluminationLevels = VarianceFrameOverIlluminationLevels.astype(np.float32)
+    AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels.astype(np.float32)
+    SlopeImage = SlopeImage.astype(np.float32)
+    InterceptImage = InterceptImage.astype(np.float32)
+    R2Image = R2Image.astype(np.float32)
+
+    tifffile.imwrite(ExtractedDataPath+"GainPixelVariance.tif",VarianceFrameOverIlluminationLevels)
+    tifffile.imwrite(ExtractedDataPath+"GainPixelAverage.tif",AverageFrameOverIlluminationLevels)
+    tifffile.imwrite(ExtractedDataPath+"GainPixelSlope.tif",SlopeImage)
+    tifffile.imwrite(ExtractedDataPath+"GainPixelIntercept.tif",InterceptImage)
+    tifffile.imwrite(ExtractedDataPath+"GainPixelR2.tif",R2Image)
         
-        print("Average gain: %s" % np.average(SlopeImage))
-        print("Average fit R2: %s" % np.average(R2Image))
+    print("Average gain: %s" % np.average(SlopeImage))
+    print("Average fit R2: %s" % np.average(R2Image))
+    StopTime = time.time()
+    print("Time To Execute Gain Calibration: %s Seconds" % (StopTime - StartTime))
 
 def SpatialCalibrationFromRuling(FolderPath, LPM, CameraPixelSizeum):
     DataPath = FolderPath + "Calibration/Resolution/"
@@ -374,17 +495,20 @@ def ApplyCalibrationsToMovies(FolderPath):
     SizeYGain = np.shape(GainCalibrationImage)[1]
 
     ## Assume the cropping (If any) is done centered
-    RatioX = SizeXGain / SizeX
-    RatioY = SizeYGain / SizeY
+    CenterX = int(1/2*SizeXGain)
+    CenterY = int(1/2*SizeYGain)
 
-    CropXMin = int(SizeXGain * (RatioX - 1) / (2 * RatioX))
-    CropXMax = int(SizeXGain * (RatioX + 1) / (2 * RatioX))
-    CropYMin = int(SizeYGain * (RatioY - 1) / (2 * RatioY))
-    CropYMax = int(SizeYGain * (RatioY + 1) / (2 * RatioY))
+    CropXMin = int(CenterX - 1/2 * SizeX)
+    CropXMax = int(CenterX + 1/2 * SizeX)
+    CropYMin = int(CenterY - 1/2 * SizeY)
+    CropYMax = int(CenterY + 1/2 * SizeY)
 
-    
+    #CropXMin = int(SizeXGain * (RatioX - 1) / (2 * RatioX))
+    #CropXMax = int(SizeXGain * (RatioX + 1) / (2 * RatioX))
+    #CropYMin = int(SizeYGain * (RatioY - 1) / (2 * RatioY))
+    #CropYMax = int(SizeYGain * (RatioY + 1) / (2 * RatioY))
 
-    #print(CropXMin,CropXMax,CropYMin,CropYMax)
+
     GainCalibrationImageCropped = GainCalibrationImage[CropXMin:CropXMax,CropYMin:CropYMax]
 
     BeamCalibrationFile = ExtractedDataPath+"BeamFitParameters.xml"
@@ -393,36 +517,40 @@ def ApplyCalibrationsToMovies(FolderPath):
         BeamFitXML = BeautifulSoup(BFP, 'xml')
 
     ## Extracting meaningful fit parameters
+    ## For whatever reason X and Y are swapped?
+    ## Figure this out eventually
     w0XMLData = BeamFitXML.find_all('w0Pixels')
     PeakXData = BeamFitXML.find_all('PeakX')
     PeakYData = BeamFitXML.find_all('PeakY')
     for Data in w0XMLData:
         w0 = np.float32(Data.text)
     for Data in PeakXData:
-        PeakX = np.float32(Data.text)
-    for Data in PeakYData:
         PeakY = np.float32(Data.text)
+    for Data in PeakYData:
+        PeakX = np.float32(Data.text)
 
     ## Adjusting peaks for pre-cropping of the movies
+    print(PeakX, PeakY)
     PeakX = PeakX - CropXMin
     PeakY = PeakY - CropYMin
 
     CroppedShape = np.shape(GainCalibrationImageCropped)
-
+    
+    ## We will use w0 from beam fitting to determine the radius over which the movie will be cropped to
     ## I want the cropping to be around the center of the beams gaussian fit center
-    BeamCropXMin = int(PeakX - w0)
-    BeamCropXMax = int(PeakX + w0)
-    BeamCropYMin = int(PeakY - w0)
-    BeamCropYMax = int(PeakY + w0)
+    BeamCropXMin = int(PeakX - 3 * w0)
+    BeamCropXMax = int(PeakX + 3 * w0)
+    BeamCropYMin = int(PeakY - 3 * w0)
+    BeamCropYMax = int(PeakY + 3 * w0)
 
     print(PeakX,PeakY,BeamCropXMin,BeamCropXMax,BeamCropYMin,BeamCropYMax)
-    ## We will use w0 from beam fitting to determine the radius over which the movie will be cropped to
+    
     MovieCountIterator = 0
     for MoviePath in MoviePaths:
         Movie = tifffile.imread(RawDataPath + MoviePath)
-        #MovieCalibrated = Movie / GainCalibrationImageCropped ## Applying Gain Calibration
+        MovieCalibrated = Movie / GainCalibrationImageCropped ## Applying Gain Calibration
 
-        MovieCalibrated = Movie * 0.24
+        #MovieCalibrated = Movie * 0.24
 
         MovieCalibratedCropped = MovieCalibrated[0:FrameCount,BeamCropXMin:BeamCropXMax,BeamCropYMin:BeamCropYMax]
 
@@ -432,6 +560,6 @@ def ApplyCalibrationsToMovies(FolderPath):
 
     ## Applying gain calibration to the blank file
     BlankFrame = tifffile.imread(FolderPath + "Calibration/CalibrationData/BlankAverage.tif")
-    BlankFrame = BlankFrame * 0.24
+    BlankFrame = BlankFrame * 0.24 ## Not the cropped gain calibration image because the code is not yet implemented yet
 
     tifffile.imwrite(FolderPath + "Calibration/CalibrationData/BlankAverageGainCorrected.tif",BlankFrame.astype(np.float32))

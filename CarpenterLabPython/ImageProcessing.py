@@ -3,9 +3,11 @@ import tifffile
 import GeneralLibrary as GL
 import scipy.optimize as opt
 import fits
-
+import scipy.ndimage as ndimage
+import concurrent
 
 ## Defs
+
 def GetPeaksByFrameMaximumFunction(Frame, BlankFrame, FrameNumber, PeakPickingSettings):
     EditedFrameForPeakPicking = np.zeros(np.shape(Frame))
     FrameToEdit = Frame - BlankFrame
@@ -40,6 +42,242 @@ def GetPeaksByFrameMaximumFunction(Frame, BlankFrame, FrameNumber, PeakPickingSe
     return PeakList, EditedFrameForPeakPicking
     ## Output is [Frame #, Peak Maximum, Peak X, Peak Y]
 
+def GetPeaksByGradient(FrameToPick, FrameNumber):
+    Frame = np.zeros(np.shape(FrameToPick))
+    Frame += FrameToPick
+    
+    ## Denoising the peak
+    DenoiseSTD = 1 # 0.45
+    Threshold = 7
+    ViewWindow = 4
+    
+    FrameShape = np.shape(Frame)
+    
+    ## Setting the edges to a low value so peak picking doesnt occur here
+    Frame[0:ViewWindow] = 20
+    Frame[FrameShape[0]-ViewWindow:] = 20
+    Frame[0:FrameShape[0],0:ViewWindow] = 20
+    Frame[0:FrameShape[0],FrameShape[1]-ViewWindow:] = 20
+    
+    ## Denoising the input data by applying a gaussian filter to it
+    FrameDenoised = np.zeros(np.shape(Frame)) + ndimage.gaussian_filter(Frame, DenoiseSTD)
+    
+    ## Calculating the gradient
+    GradientXY = np.gradient(FrameDenoised)
+    GradientX = GradientXY[0]
+    GradientY = GradientXY[1]
+
+    PeakList = []
+    PeaksLeft = True
+    while PeaksLeft:
+        MaximaX = np.max(GradientX)
+        
+        if MaximaX < Threshold:
+            
+            PeaksLeft = False
+            break
+        
+        MaxXCoordsList = np.where(MaximaX == GradientX)
+        MaxXCoords = [MaxXCoordsList[0][0],MaxXCoordsList[1][0]]
+        
+        if MaxXCoords[0] < FrameShape[0] - ViewWindow and MaxXCoords[0] > ViewWindow:
+            if MaxXCoords[1] < FrameShape[1] - ViewWindow and MaxXCoords[1] > ViewWindow:
+                GradXCropped = GradientX[MaxXCoords[0]-ViewWindow:MaxXCoords[0]+ViewWindow,MaxXCoords[1]-ViewWindow:MaxXCoords[1]+ViewWindow]
+                GradYCropped = GradientY[MaxXCoords[0]-ViewWindow:MaxXCoords[0]+ViewWindow,MaxXCoords[1]-ViewWindow:MaxXCoords[1]+ViewWindow]
+
+                XOffset = MaxXCoords[0]-ViewWindow
+                YOffset = MaxXCoords[1]-ViewWindow
+        
+                MinimaX = np.min(GradXCropped)
+                MinXCoordsList = np.where(MinimaX == GradXCropped)
+                MinXCoords = [MinXCoordsList[0][0]+XOffset,MinXCoordsList[1][0]+YOffset]
+        
+                MaximaY = np.max(GradYCropped)
+                MaxYCoordsList = np.where(MaximaY == GradYCropped)
+                MaxYCoords = [MaxYCoordsList[0][0]+XOffset,MaxYCoordsList[1][0]+YOffset]
+                
+                MinimaY = np.min(GradYCropped)
+                MinYCoordsList = np.where(MinimaY == GradYCropped)
+                MinYCoords = [MinYCoordsList[0][0]+XOffset,MinYCoordsList[1][0]+YOffset]
+
+                AveXCoords = MaxXCoords[0] + MinXCoords[0] + MaxYCoords[0] + MinYCoords[0]
+                AveYCoords = MaxXCoords[1] + MinXCoords[1] + MaxYCoords[1] + MinYCoords[1]
+                AveCoords = [int(AveXCoords / 4), int(AveYCoords / 4)]
+        
+                GradientX[AveCoords[0]-ViewWindow:AveCoords[0]+ViewWindow,AveCoords[1]-ViewWindow:AveCoords[1]+ViewWindow] = 0
+                FrameMax = Frame[AveCoords[0],AveCoords[1]]
+                Frame[AveCoords[0]-ViewWindow:AveCoords[0]+ViewWindow,AveCoords[1]-ViewWindow:AveCoords[1]+ViewWindow] = 0
+                
+                PeakList.append([FrameNumber, FrameMax, AveCoords[0], AveCoords[1]])
+                
+            else:
+                GradientX[MaxXCoords[0],MaxXCoords[1]] = 10
+                Frame[MaxXCoords[0],MaxXCoords[1]] = 10
+        else:
+            GradientX[MaxXCoords[0],MaxXCoords[1]] = 10
+            Frame[MaxXCoords[0],MaxXCoords[1]] = 10
+    
+    return Frame, PeakList, GradientX
+
+def GetPeaksByGradientWrapper(args):
+    Frame, PeakList, GradientX = GetPeaksByGradient(args[0], args[1])
+    return Frame, PeakList, GradientX
+
+def OrganizePeaksThroughTime(PickedPeaks, PeakGroupingSettings):
+    ## Comparing each peak against each other peak, to organize them through time (across frames)
+    OrganizedPeaks = []
+    PickedPeaksLength = len(PickedPeaks)
+    OrganizePeaksThroughTimeIterator = 0
+    for Peak1 in PickedPeaks:
+        Peak1Array = [Peak1]
+        for Peak2 in PickedPeaks:
+            if np.all(Peak1 != Peak2): ## If they arent the same peak
+                if GL.Distance([Peak1[2],Peak1[3]],[Peak2[2],Peak2[3]]) < PeakGroupingSettings[0]: ## If they are within a certain distance of one another
+                    Peak1Array.append(Peak2) ## Append it as a peak
+                    PickedPeaks.remove(Peak2) ## Remove it from the full peak array to not check for it twice
+
+        OrganizePeaksThroughTimeIterator += 1
+
+        print("Organizing Peak: %s out of %s" % (OrganizePeaksThroughTimeIterator,PickedPeaksLength))
+
+        PickedPeaks.remove(Peak1) ## Remove the peak that was checked against so it is not checked twice
+        OrganizedPeaks.append(Peak1Array)
+        
+    return OrganizedPeaks
+    #print(len(self.OrganizedPeaks))
+
+
+
+
+def FitPeaksOverMovieFunction2(AreaToFit, PeakFitParameters, PSF, BackgroundLevels):
+    ## This could potentially be fixed with this: https://scipy-cookbook.readthedocs.io/items/FittingData.html
+    ## Again this is split as a separate function as it is a very easily parrallizable task
+    
+    xaxis = np.linspace(0, 2*PSF, 2*PSF)
+    yaxis = np.linspace(0, 2*PSF, 2*PSF)
+    xaxis, yaxis = np.meshgrid(xaxis, yaxis)  
+
+    #print(BackgroundSum)
+    AreaSum = np.sum(AreaToFit[PeakFitParameters[0]])
+
+    PeakFittingDataOverTime = []
+    SumOfPSFAtInitialFit = np.sum(AreaToFit[PeakFitParameters[0]]) ## Getting a PSF sized sum of the data
+    FrameCounter = 0
+    for Frames in AreaToFit: ## For every frame of the movie:
+        if np.sum(Frames) > (AreaSum * 0.65): ## If the photons collected are different enough from the background try to fit it
+            InitialGuess = (PeakFitParameters[1], PSF, PSF, 2, 2, 0, BackgroundLevels)
+            FrameDataRaveled = Frames.ravel() ## Raveling is the flattening of an array
+            FittingBound = [[PeakFitParameters[1]*0.5,0,0,1,1,-0.5,0],[PeakFitParameters[1]*2,PSF*2,PSF*2,PSF,PSF,0.5,118]]
+            
+            #print(np.shape(FrameDataRaveled), xaxis, yaxis)
+            #popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 1000, p0 = InitialGuess, bounds = FittingBound)
+            try:
+                popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 100, p0 = InitialGuess, bounds = FittingBound)
+                FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
+                R2 = GL.getR2(FrameDataRaveled,FittedData)
+            except:
+                popt = [0,0,0,0,0,0,0]
+                R2 = 0
+
+            PeakFitParameters[0] = FrameCounter
+            popt[1] = popt[1] + PeakFitParameters[2] - PSF ## Adjusting the peak center to real coordinates
+            popt[2] = popt[2] + PeakFitParameters[3] - PSF
+            if R2 < 0.85:
+                popt = [0,0,0,0,0,0,0]
+                R2 = 0
+
+            AreaSum5x5 = np.sum(Frames[PSF-5:PSF+5,PSF-5:PSF+5])
+            PhotoElectronsPerSecond = AreaSum5x5 / 0.1
+            FittingData = [*PeakFitParameters,*popt,R2,AreaSum5x5,PhotoElectronsPerSecond]
+            PeakFittingDataOverTime.append(FittingData)
+
+        else:
+            popt = [0,0,0,0,0,0,0]
+            R2 = 0
+            AreaSum5x5 = np.sum(Frames[PSF-5:PSF+5,PSF-5:PSF+5])
+            PhotoElectronsPerSecond = AreaSum5x5 / 0.1
+            FittingData = [*PeakFitParameters,*popt,R2,AreaSum5x5,PhotoElectronsPerSecond]
+            PeakFittingDataOverTime.append(FittingData)           
+            
+            ## [Frame #, Peak Height, Peak X, Peak Y, amplitude, xo, yo, sigma_x, sigma_y, theta, offset, R2, Area sum 5x5, Photoelectrons Per Second]
+
+        FrameCounter += 1
+
+
+    return PeakFittingDataOverTime
+
+
+
+
+
+
+def FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, BackgroundLevels, xaxis, yaxis, PeakCounter, FrameCount):
+    ## This could potentially be fixed with this: https://scipy-cookbook.readthedocs.io/items/FittingData.html
+    ## Again this is split as a separate function as it is a very easily parrallizable task
+    
+    xaxis = np.linspace(0, 2*PSF, 2*PSF)
+    yaxis = np.linspace(0, 2*PSF, 2*PSF)
+    xaxis, yaxis = np.meshgrid(xaxis, yaxis)  
+
+    #print(BackgroundSum)
+    AreaSum = np.sum(AreaToFit[PeakFitParameters[0]])
+
+    PeakFittingDataOverTime = []
+    SumOfPSFAtInitialFit = np.sum(AreaToFit[PeakFitParameters[0]]) ## Getting a PSF sized sum of the data
+    FrameCounter = 0
+    for Frames in AreaToFit: ## For every frame of the movie:
+        if np.sum(Frames) > (AreaSum * 0.65): ## If the photons collected are different enough from the background try to fit it
+            InitialGuess = (PeakFitParameters[1], PSF, PSF, 2, 2, 0, BackgroundLevels)
+            FrameDataRaveled = Frames.ravel() ## Raveling is the flattening of an array
+            FittingBound = [[PeakFitParameters[1]*0.5,0,0,1,1,-0.5,0],[PeakFitParameters[1]*2,PSF*2,PSF*2,PSF,PSF,0.5,118]]
+            
+            #print(np.shape(FrameDataRaveled), xaxis, yaxis)
+            #popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 1000, p0 = InitialGuess, bounds = FittingBound)
+            try:
+                popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 10, p0 = InitialGuess, bounds = FittingBound)
+                FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
+                R2 = GL.getR2(FrameDataRaveled,FittedData)
+            except:
+                try:
+                    popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 100, p0 = InitialGuess, bounds = FittingBound)
+                    FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
+                    R2 = GL.getR2(FrameDataRaveled,FittedData)
+                        
+                except:
+                #    try:
+                #        popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 1000, p0 = InitialGuess, bounds = FittingBound)
+                #        FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
+                #        R2 = GL.getR2(FrameDataRaveled,FittedData)
+                #        
+                #    except:
+                    popt = [0,0,0,0,0,0,0]
+                    R2 = 0
+            PeakFitParameters[0] = FrameCounter
+            popt[1] = popt[1] + PeakFitParameters[2] - PSF ## Adjusting the peak center to real coordinates
+            popt[2] = popt[2] + PeakFitParameters[3] - PSF
+            if R2 < 0.85:
+                popt = [0,0,0,0,0,0,0]
+                R2 = 0
+
+            AreaSum5x5 = np.sum(Frames[PSF-5:PSF+5,PSF-5:PSF+5])
+            PhotoElectronsPerSecond = AreaSum5x5 / 0.1
+            FittingData = [*PeakFitParameters,*popt,R2,AreaSum5x5,PhotoElectronsPerSecond]
+            PeakFittingDataOverTime.append(FittingData)
+
+        else:
+            popt = [0,0,0,0,0,0,0]
+            R2 = 0
+            AreaSum5x5 = np.sum(Frames[PSF-5:PSF+5,PSF-5:PSF+5])
+            PhotoElectronsPerSecond = AreaSum5x5 / 0.1
+            FittingData = [*PeakFitParameters,*popt,R2,AreaSum5x5,PhotoElectronsPerSecond]
+            PeakFittingDataOverTime.append(FittingData)           
+            
+            ## [Frame #, Peak Height, Peak X, Peak Y, amplitude, xo, yo, sigma_x, sigma_y, theta, offset, R2, Area sum 5x5, Photoelectrons Per Second]
+
+        FrameCounter += 1
+
+
+    return PeakFittingDataOverTime
 
 
 ## Classes
@@ -57,7 +295,6 @@ class Movie29_05_2025:
         self.ExtractedDataPath = DataOutPath
 
         GL.CreateIfNotExist(DataOutPath)
-
 
         ## Debug Options
         self.DebugPeakPicking = True
@@ -80,10 +317,75 @@ class Movie29_05_2025:
             print("Picking Peaks at Frame: %s / %s" % (FrameCounterGetPeaks,self.FrameCount))
         
         if self.DebugPeakPicking == True:
-            tifffile.imwrite(self.ExtractedDataPath+"/PickedPeaks.tif",self.MoviePicked.astype(np.float32))
+            tifffile.imwrite(self.ExtractedDataPath+"PickedPeaks.tif" %s ,self.MoviePicked.astype(np.float32))
             print(len(self.PickedPeaks))
 
+    def GetPeaksByGradient(self):
 
+
+        CompletePeakList = []
+        EditedPickedMovie = []
+        EditedGradientX = []
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=61) as executor: 
+            ## This is the hard limit for workers on windows: 
+            ## See: https://github.com/python/cpython/issues/71090
+            ## See: https://github.com/psf/black/issues/564
+            ArrayCounter = 0
+            DataPool = []
+            for Frames in self.MovieData:
+                ProcessData = [Frames, ArrayCounter]
+                DataPool.append(ProcessData)
+                ArrayCounter += 1
+
+            ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
+            ThreadReturnedData = executor.map(GetPeaksByGradientWrapper, DataPool)
+            
+            FinishedProcessCounter = 0
+            for Data in ThreadReturnedData:
+                Frame = Data[0]
+                PeakList = Data[1]
+                GradientX = Data[2]
+                
+                EditedPickedMovie.append(Frame)
+                EditedGradientX.append(GradientX)
+                
+                for Peaks in PeakList:
+                    CompletePeakList.append(Peaks)
+
+                FinishedProcessCounter += 1
+                print("Finished Frame %s out of %s" % (FinishedProcessCounter, self.FrameCount))
+
+
+
+        #EditedPickedMovie = np.empty((0,self.PixelsX,self.PixelsY))
+        #EditedGradientX = np.empty((0,self.PixelsX,self.PixelsY))
+        #FrameCounter = 0
+        #for Frames in self.MovieData:
+        #    EditedPeak, PeakListFromFrame, GradientX = GetPeaksByGradient(Frames, FrameCounter)
+        #    FrameCounter += 1
+        #    for Peaks in PeakListFromFrame:
+        #        CompletePeakList.append(Peaks)
+        
+        #    EditedPeak = np.expand_dims(EditedPeak, axis = 0)
+        #    GradientX = np.expand_dims(GradientX, axis = 0)
+
+        #    EditedPickedMovie = np.vstack((EditedPickedMovie, EditedPeak))
+        #    EditedGradientX = np.vstack((EditedGradientX,GradientX))
+
+        EditedPickedMovie = np.array(EditedPickedMovie)
+        EditedGradientX = np.array(EditedGradientX)
+
+        if self.DebugPeakPicking == True:
+            tifffile.imwrite(self.ExtractedDataPath + "PickedPeaks.tif", EditedPickedMovie.astype(np.float32))   
+            tifffile.imwrite(self.ExtractedDataPath + "PickedGradientX.tif", EditedGradientX.astype(np.float32))
+            print(len(CompletePeakList))
+        
+        self.PickedPeaks = CompletePeakList
+
+
+
+    
     def GetPeaksByFrameMaximum(self, FrameData, BlankFrameData, FrameNumber):
         ## This calls an external function, so that other libraries (For instance the microscopecontroller library's autofocus function) to use
         PeakList, EditedFrame = GetPeaksByFrameMaximumFunction(FrameData, BlankFrameData, FrameNumber, self.PeakPickingSettings)
@@ -114,71 +416,97 @@ class Movie29_05_2025:
 
     def FitPeaksOverMovie(self):
         PSF = self.PeakFittingSettings[0]
+        
+        xaxis = np.linspace(0, 2*PSF, 2*PSF)
+        yaxis = np.linspace(0, 2*PSF, 2*PSF)
+        xaxis, yaxis = np.meshgrid(xaxis, yaxis)  
+        
         BackgroundLevels = np.average(self.MovieData[0,0:PSF,0:PSF])
         BackgroundSum = np.sum(self.MovieData[0,0:PSF,0:PSF])
         self.FittedPeaksOverTime = []
+       
+        DataPool = []
         PeakNumber = 0
         for PeakArrays in self.OrganizedPeaks: ## OrganizedPeaks = [[Peak1Frame1,Peak1Frame2,...],[Peak2Frame1,Peak2Frame2,...],...]
-            PeakFitParameters = PeakArrays[0] ## Just taking the first peak fit info (the center should be the same across frames)
+            print("Fitting Peak #%s out of %s" % (PeakNumber + 1,len(self.OrganizedPeaks)))
+            PeakFitParameters = PeakArrays[0]
+            ## Output is [Frame #, Peak Maximum, Peak X, Peak Y]
+
+            AreaToFit = self.MovieData[0:self.FrameCount,int(PeakFitParameters[2]-PSF):int(PeakFitParameters[2]+PSF),int(PeakFitParameters[3]-PSF):int(PeakFitParameters[3]+PSF)]
+            
+            Data = [AreaToFit, PeakFitParameters, BackgroundSum, PSF, BackgroundLevels, xaxis, yaxis, PeakNumber, self.FrameCount]
+            
+            DataPool.append(Data)
+            PeakNumber += 1
+
+        ## You CANNOT use this on defs belonging to a class, I use @staticmethod which isolates it from the class.
+        with concurrent.futures.ProcessPoolExecutor(max_workers=61) as executor:  ## ProcessPoolExecutor
+            ## This is the hard limit for workers on windows: 
+            ## See: https://github.com/python/cpython/issues/71090
+            ## See: https://github.com/psf/black/issues/564
+
+
+            ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
+            ThreadReturnedData = executor.map(Movie29_05_2025.FitPeaksOverMovieFunctionWrapper, DataPool)
+            FinishedProcessCounter = 0
+            for PeakFittingDataOverTime in ThreadReturnedData:  
+                PeakFittingOverTimeAdjusted = []
+                FitPercent = 0
+                for Data in PeakFittingDataOverTime:
+                    Data[7] = Data[7] * 65 ## Eventually set this to use data from the calibration files
+                    Data[8] = Data[8] * 65
+                    PeakFittingOverTimeAdjusted.append(Data)
+                    if Data[11] > 0:
+                        FitPercent += 1
+
+                FitPercent = np.round(FitPercent / self.FrameCount * 100, 2)
+                
+                Header = ["Frame","Height","Peak X","Peak Y","Amplitude","Peak X", "Peak Y", "Sigma X (nm)", "Sigma Y (nm)", "Theta (Radians)", "Offset", "R2", "AreaSum5x5", "Photoelectrons per second"]
+                GL.WriteCsv2D_Data(PeakFittingOverTimeAdjusted,self.ExtractedDataPath,"Peak%s_%sPercentFitted.csv" % (FinishedProcessCounter,FitPercent),Header)
+                
+                print("Finished Peak %s out of %s" % (FinishedProcessCounter + 1, len(self.OrganizedPeaks)))
+                FinishedProcessCounter += 1
+
+                self.FittedPeaksOverTime.append(PeakFittingDataOverTime)
+                
+        
+
+
+        #for PeakArrays in self.OrganizedPeaks: ## OrganizedPeaks = [[Peak1Frame1,Peak1Frame2,...],[Peak2Frame1,Peak2Frame2,...],...]
+            #print("Fitting Peak #%s out of %s" % (PeakNumber,len(self.OrganizedPeaks)-1))
+            #PeakFitParameters = PeakArrays[0] ## Just taking the first peak fit info (the center should be the same across frames)
             ## PeakFitParameters
             ## Output is [Frame #, Peak Maximum, Peak X, Peak Y]
             
-            AreaToFit = self.MovieData[0:self.FrameCount,int(PeakFitParameters[2]-PSF):int(PeakFitParameters[2]+PSF),int(PeakFitParameters[3]-PSF):int(PeakFitParameters[3]+PSF)]
-            PeakFittingDataOverTime = self.FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, BackgroundLevels)
-            PeakFittingOverTimeAdjusted = []
-            for Data in PeakFittingDataOverTime:
-                Data[7] = Data[7] * 65 ## Eventually set this to use data from the calibration files
-                Data[8] = Data[8] * 65
-                PeakFittingOverTimeAdjusted.append(Data)
-            Header = ["Frame","Height","Peak X","Peak Y","Amplitude","Peak X", "Peak Y", "Sigma X (nm)", "Sigma Y (nm)", "Theta (Radians)", "Offset", "R2", "AreaSum5x5", "Photoelectrons per second"]
-            GL.WriteCsv2D_Data(PeakFittingOverTimeAdjusted,self.ExtractedDataPath,"Peak%s.csv" % PeakNumber,Header)
-            
-            PeakNumber += 1
-            print("Fitting Peak #%s out of %s" % (PeakNumber,len(self.OrganizedPeaks)))
-            self.FittedPeaksOverTime.append(PeakFittingDataOverTime)
-    
-    def FitPeaksOverMovieFunction(self,AreaToFit, PeakFitParameters, BackgroundSum, PSF, BackgroundLevels):
-        ## This could potentiall be fixed with this: https://scipy-cookbook.readthedocs.io/items/FittingData.html
-        ## Again this is split as a separate function as it is a very easily parrallizable task
-        xaxis = np.linspace(0, 2*PSF, 2*PSF)
-        yaxis = np.linspace(0, 2*PSF, 2*PSF)
-        xaxis, yaxis = np.meshgrid(xaxis, yaxis)
-        #print(BackgroundSum)
-        np.sum(AreaToFit[PeakFitParameters[0]])
-
-        PeakFittingDataOverTime = []
-        SumOfPSFAtInitialFit = np.sum(AreaToFit[PeakFitParameters[0]]) ## Getting a PSF sized sum of the data
-        FrameCounter = 0
-        for Frames in AreaToFit: ## For every frame of the movie:
-            if np.sum(Frames) > (np.sum(AreaToFit[PeakFitParameters[0]]) * 0.65): ## If the photons collected are different enough from the background try to fit it
-                InitialGuess = (PeakFitParameters[1], PSF, PSF, 2, 2, 0, BackgroundLevels)
-                FrameDataRaveled = Frames.ravel() ## Raveling is the flattening of an array
-                FittingBound = [[PeakFitParameters[1]*0.5,0,0,1,1,-0.5,0],[PeakFitParameters[1]*2,PSF*2,PSF*2,PSF,PSF,0.5,118]]
-                try:
-                    popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, p0 = InitialGuess, maxfev = 500, bounds = FittingBound)
-                    FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
-                    R2 = GL.getR2(FrameDataRaveled,FittedData)
-
-                except:
-                    popt = [0,0,0,0,0,0,0]
-                    R2 = 0   
-
-                PeakFitParameters[0] = FrameCounter
-                popt[1] = popt[1] + PeakFitParameters[2] - PSF ## Adjusting the peak center to real coordinates
-                popt[2] = popt[2] + PeakFitParameters[3] - PSF
-                if R2 < 0.85:
-                    popt = [0,0,0,0,0,0,0]
-                    R2 = 0
-
-                AreaSum5x5 = np.sum(Frames[PSF-5:PSF+5,PSF-5:PSF+5])
-                PhotoElectronsPerSecond = AreaSum5x5 / 0.1
-                FittingData = [*PeakFitParameters,*popt,R2,AreaSum5x5,PhotoElectronsPerSecond]
-                PeakFittingDataOverTime.append(FittingData)
+            #AreaToFit = self.MovieData[0:self.FrameCount,int(PeakFitParameters[2]-PSF):int(PeakFitParameters[2]+PSF),int(PeakFitParameters[3]-PSF):int(PeakFitParameters[3]+PSF)]
+            #PeakFittingDataOverTime = self.FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, BackgroundLevels, xaxis, yaxis)
+            #PeakFittingOverTimeAdjusted = []
+            #FitPercent = 0
+            #for Data in PeakFittingDataOverTime:
+            #    Data[7] = Data[7] * 65 ## Eventually set this to use data from the calibration files
+            #    Data[8] = Data[8] * 65
+            #    PeakFittingOverTimeAdjusted.append(Data)
+            #    if Data[11] > 0:
+            #        FitPercent += 1
+                    
+            #FitPercent = np.round(FitPercent / self.FrameCount * 100, 2)
                 
-            FrameCounter += 1
+            #Header = ["Frame","Height","Peak X","Peak Y","Amplitude","Peak X", "Peak Y", "Sigma X (nm)", "Sigma Y (nm)", "Theta (Radians)", "Offset", "R2", "AreaSum5x5", "Photoelectrons per second"]
+            #GL.WriteCsv2D_Data(PeakFittingOverTimeAdjusted,self.ExtractedDataPath,"Peak%s_%sPercentFitted.csv" % (PeakNumber,FitPercent),Header)
+            
+            #PeakNumber += 1
+
+            #self.FittedPeaksOverTime.append(PeakFittingDataOverTime)
+
+    def GetFittedPeaks(self):
+        return self.FittedPeaksOverTime    
+
+    @staticmethod ## https://stackoverflow.com/questions/17419879/why-i-cannot-use-python-module-concurrent-futures-in-class-method
+    def FitPeaksOverMovieFunctionWrapper(args):
+        ## The function must be called as a method of the class explicetely, since it is a static method
+        PeakFittingDataOverTime = FitPeaksOverMovieFunction(args[0], args[1], args[2], args[3], args[3], args[4], args[5], args[6], args[7])
+
         return PeakFittingDataOverTime
-
-
 
 
 
@@ -434,8 +762,40 @@ def FastGaussianFit(Frame,PeakInfo,ViewingWindow):
     pass
 
 
-        
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class Movie:
     def __init__(self,Identifier,Path,Filename,PeakPickingSettings,FittingProperties,FitProperties,PeakGroupingSettings,ConversionFactors,**kwargs):
