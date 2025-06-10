@@ -8,6 +8,7 @@
     - Implemented bug fixes
     - Removed max_workers from concurrent.futures.ProcessThreadPool, as the default should be sufficient, and *too* many workers can actually slow the system from overhead.
     - Fixed accidentally subtracting illumination frames from themselves, instead of the dark frame from itself (to remove the offset)
+    - Added read noise frame generation for comparison of our calibration steps to manufacturer steps
     
 
 ## Added SinglePixelFit.py
