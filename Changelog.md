@@ -13,9 +13,13 @@
 ## Added SinglePixelFit.py
   - Goal: Crop data by any arbitrary ammount to produce smaller or differently shaped videos
 
+
+## Added PlotHistogram.py
+  - Goal: Plot a histogram to compare our gain calibration data against Hamamatsu's
+
+
 ## General:
   - Removed broken glass
-
 
 
 # Version 2.0.0 (2025_06_06)
@@ -24,6 +28,7 @@
   - Takes a directory, returns a compound array marked with the folder, path, and data, and returns a big array
 - ### Added a FormatXMLString function
   - Takes a string from the XML reader and removes the extraneous \n and spaces from it
+
 
 ## GeneratesCMOSCalibrationData.py:
   - Optimized the GainCalibration function to use less ram (hopefully)
