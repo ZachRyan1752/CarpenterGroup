@@ -16,7 +16,6 @@ import ImageProcessing as IP
 import lxml.etree as etree
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
-import concurrent
 import time
 import matplotlib.pyplot as plt
 
@@ -122,13 +121,12 @@ def StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndAB
     StitchedMovie = StitchedMovie - BackgroundAverage
     MovieShape = np.shape(StitchedMovie)
     print(MovieShape,PathIndexes)
-    time.sleep(2)
     ## Get the ratio of frames and adjust them to be the same mean
     ## Subtract Frame B from Frame A
     ## Get the variance of the noise
     #StitchedMovieAB = np.empty((0,MovieShape[1],MovieShape[2]))
     StitchedMovieAB = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=61) as executor: 
+    with concurrent.futures.ProcessPoolExecutor() as executor: 
         ## This is the hard limit for workers on windows: 
         ## See: https://github.com/python/cpython/issues/71090
         ## See: https://github.com/psf/black/issues/564
@@ -194,7 +192,7 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     AverageFrameOverIlluminationLevels = []
     VarianceFrameOverIlluminationLevels = []
 
-    AverageFrameOverIlluminationLevels.append(np.array(DarkFrameAverage))
+    AverageFrameOverIlluminationLevels.append(np.array(DarkFrameAverage-DarkFrameAverage))
     VarianceFrameOverIlluminationLevels.append(np.array(DarkFrameVariance))
 
     RemovedCount = 0
@@ -228,17 +226,20 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
             MoviePaths.pop(Indexes)
             RemovedCount += 1
         
-        AverageFrameOverIlluminationLevels.append(np.array(FrameAverage-FrameAverage))
+        AverageFrameOverIlluminationLevels.append(np.array(FrameAverage))
         VarianceFrameOverIlluminationLevels.append(np.array(FrameVariance))
 
 
 
-    AverageFrameOverIlluminationLevels2 = np.empty(np.shape(MovieShape))
+    AverageFrameOverIlluminationLevels2 = np.empty((0,np.shape(AverageFrameOverIlluminationLevels)[1],np.shape(AverageFrameOverIlluminationLevels)[2]))
     for Frames in AverageFrameOverIlluminationLevels:
+        print(np.average(Frames))
+        Frames = np.expand_dims(Frames, axis = 0)
         AverageFrameOverIlluminationLevels2 = np.vstack((AverageFrameOverIlluminationLevels2, Frames))
 
-    VarianceFrameOverIlluminationLevels2 = np.empty(np.shape(MovieShape))
+    VarianceFrameOverIlluminationLevels2 = np.empty((0,np.shape(VarianceFrameOverIlluminationLevels)[1],np.shape(VarianceFrameOverIlluminationLevels)[2]))
     for Frames in VarianceFrameOverIlluminationLevels:
+        Frames = np.expand_dims(Frames, axis = 0)
         VarianceFrameOverIlluminationLevels2 = np.vstack((VarianceFrameOverIlluminationLevels2, Frames))
 
     AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels2
@@ -252,7 +253,6 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
 
     print("Average and Variance Array Shapes")
     print(np.shape(AverageFrameOverIlluminationLevels),np.shape(VarianceFrameOverIlluminationLevels))
-    #time.sleep(5)
     Iterator1 = 0
     ColumnSlope = []
     ColumnIntercept = []
@@ -273,7 +273,7 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
         print("Working on Column Number: %s" % Iterator1)
         Iterator1 += 1
         
-    with concurrent.futures.ProcessPoolExecutor(max_workers=61) as executor: 
+    with concurrent.futures.ProcessPoolExecutor() as executor: 
         ## This is the hard limit for workers on windows: 
         ## See: https://github.com/python/cpython/issues/71090
         ## See: https://github.com/psf/black/issues/564
@@ -324,9 +324,8 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     InterceptImage = np.array(ColumnIntercept)
     R2Image = np.array(ColumnR2)
 
-    VarianceFrame = np.array(VarianceFrameOverIlluminationLevels[0])
+    VxG = np.sqrt(VarianceFrameOverIlluminationLevels[0]) * SlopeImage
 
-    VxG = VarianceFrame * SlopeImage
     VarianceFrameOverIlluminationLevels = VarianceFrameOverIlluminationLevels.astype(np.float32)
     AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels.astype(np.float32)
     print(np.shape(VarianceFrameOverIlluminationLevels),np.shape(AverageFrameOverIlluminationLevels))
@@ -335,7 +334,6 @@ def GainCalibrationFromMovies(FolderPath,IlluminationLevels):
     InterceptImage = InterceptImage.astype(np.float32)
     R2Image = R2Image.astype(np.float32)
 
-    tifffile.imwrite(ExtractedDataPath+"Variance.tif",VarianceFrame.astype(np.float32))
     tifffile.imwrite(ExtractedDataPath+"ElectronReadoutNoise.tif",VxG.astype(np.float32))
 
     tifffile.imwrite(ExtractedDataPath+"GainPixelVariance.tif",VarianceFrameOverIlluminationLevels)
