@@ -1,4 +1,4 @@
-# Version 2.1.0 (2025_06_09)
+# Version 2.1.0 (2025_06_11)
 ## GeneratesCMOSCalibrationData.py:
   - Implemented further optimizations, tested using a supercomputer
   - Removed extraneous code
@@ -9,6 +9,7 @@
     - Removed max_workers from concurrent.futures.ProcessThreadPool, as the default should be sufficient, and *too* many workers can actually slow the system from overhead.
     - Fixed accidentally subtracting illumination frames from themselves, instead of the dark frame from itself (to remove the offset)
     - Added read noise frame generation for comparison of our calibration steps to manufacturer steps
+    - Added a wrapper function to prevent recursive calling of parallel execution functions.
     
 
 ## Added SinglePixelFit.py
