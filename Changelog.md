@@ -10,6 +10,10 @@
     - Fixed accidentally subtracting illumination frames from themselves, instead of the dark frame from itself (to remove the offset)
     - Added read noise frame generation for comparison of our calibration steps to manufacturer steps
     - Added a wrapper function to prevent recursive calling of parallel execution functions.
+   
+    
+  - ### ApplyCalibrationsToMovies:
+    - Now outputs a file that explicetely states where each movie comes from after the calibration is done.
     
 
 ## Added SinglePixelFit.py
