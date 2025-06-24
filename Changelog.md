@@ -1,3 +1,14 @@
+# To-do List
+## Documentation
+### GeneralLibrary.py
+### GeneratesCMOSCalibrationData.py
+### ImageProcessing.py
+### MicroscopeController.py
+### Fits.py
+# Version 2.2.0 (2025_06_24)
+## GeneratesCMOSCalibrationData.py:
+  - Added some further documentation of the code
+
 # Version 2.1.0 (2025_06_11)
 ## GeneratesCMOSCalibrationData.py:
   - Implemented further optimizations, tested using a supercomputer
