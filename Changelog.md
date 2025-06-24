@@ -20,7 +20,9 @@
 ## Implementation
 ### GeneralLibrary.py
 ### GeneratesCMOSCalibrationData.py
-  - Add automatic output of histograms like manufacturers provide
+  - Add automatic output of histograms like manufacturers provide for gain calibration code
+  - Remove OPENCV2 from spatial calibration code
+  - Extract frequencies directly from numpy, rather than from peak picking
 
 ### ImageProcessing.py
 ### MicroscopeController.py
