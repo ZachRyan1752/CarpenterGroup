@@ -5,9 +5,32 @@
 ### ImageProcessing.py
 ### MicroscopeController.py
 ### Fits.py
+### Graphing.py
+
+## Code clean up
+### GeneralLibrary.py
+### GeneratesCMOSCalibrationData.py
+  - Remove extraneous, commented out code
+  - Clean up some of the debug outputs
+### ImageProcessing.py
+### MicroscopeController.py
+### Fits.py
+### Graphing.py
+
+## Implementation
+### GeneralLibrary.py
+### GeneratesCMOSCalibrationData.py
+  - Add automatic output of histograms like manufacturers provide
+
+### ImageProcessing.py
+### MicroscopeController.py
+### Fits.py
+### Graphing.py
+
 # Version 2.2.0 (2025_06_24)
 ## GeneratesCMOSCalibrationData.py:
   - Added some further documentation of the code
+  - Changes some variable names for clarity
 
 # Version 2.1.0 (2025_06_11)
 ## GeneratesCMOSCalibrationData.py:
