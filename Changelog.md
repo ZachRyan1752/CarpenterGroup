@@ -34,7 +34,7 @@
 # Version 2.2.0 (2025_06_24)
 ## GeneratesCMOSCalibrationData.py:
   - Added some further documentation of the code
-  - Changes some variable names for clarity
+  - Made changes to some variable names for clarity
   - Add the ability to select data through a file explorer window, rather than manually setting the locations or using default directories
   
 
