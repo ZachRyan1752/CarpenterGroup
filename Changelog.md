@@ -14,6 +14,8 @@
   - Clean up some of the debug outputs
 ### ImageProcessing.py
 ### MicroscopeController.py
+  - Clean up some debug outputs
+  - Remove extransous, commented out code
 ### Fits.py
 ### Graphing.py
 
@@ -49,8 +51,12 @@
    
     
   - ### ApplyCalibrationsToMovies:
-    - Now outputs a file that explicetely states where each movie comes from after the calibration is done.
-    
+    - Now outputs a file that explicetly states where each movie comes from after the calibration is done.
+
+## MicroscopeController.py:
+  - Added USEQ.MDASequence support: [Read-Here]: https://pymmcore-plus.github.io/pymmcore-plus/guides/mda_engine/
+  - Added a movie collection function, capable of handling frame rates of up to 600 fps at 144 x 144 movies, 150 fps at 1152 x 1152 movies
+
 
 ## Added SinglePixelFit.py
   - Goal: Crop data by any arbitrary ammount to produce smaller or differently shaped videos
