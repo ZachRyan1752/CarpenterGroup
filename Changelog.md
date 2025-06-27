@@ -35,6 +35,8 @@
 ## GeneratesCMOSCalibrationData.py:
   - Added some further documentation of the code
   - Changes some variable names for clarity
+  - Add the ability to select data through a file explorer window, rather than manually setting the locations or using default directories
+  
 
 ## MicroscopeController.py:
   - Added USEQ.MDASequence support: [Read-Here]: https://pymmcore-plus.github.io/pymmcore-plus/guides/mda_engine/
