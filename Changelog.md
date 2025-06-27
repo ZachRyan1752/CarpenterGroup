@@ -36,10 +36,16 @@
   - Added some further documentation of the code
   - Changes some variable names for clarity
 
+## MicroscopeController.py:
+  - Added USEQ.MDASequence support: [Read-Here]: https://pymmcore-plus.github.io/pymmcore-plus/guides/mda_engine/
+  - Added a movie collection function, capable of handling frame rates of up to 600 fps at 144 x 144 movies, 150 fps at 1152 x 1152 movies
+
+
 # Version 2.1.0 (2025_06_11)
 ## GeneratesCMOSCalibrationData.py:
   - Implemented further optimizations, tested using a supercomputer
   - Removed extraneous code
+
   - ### GainCalibrationFromMovies:
     - Removed extraneous code
     - Moved away from np.vstack to creating a list of arrays, then stitching them into a numpy movie to help save memory
@@ -52,10 +58,6 @@
     
   - ### ApplyCalibrationsToMovies:
     - Now outputs a file that explicetly states where each movie comes from after the calibration is done.
-
-## MicroscopeController.py:
-  - Added USEQ.MDASequence support: [Read-Here]: https://pymmcore-plus.github.io/pymmcore-plus/guides/mda_engine/
-  - Added a movie collection function, capable of handling frame rates of up to 600 fps at 144 x 144 movies, 150 fps at 1152 x 1152 movies
 
 
 ## Added SinglePixelFit.py
