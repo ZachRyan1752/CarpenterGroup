@@ -41,6 +41,8 @@
 ## MicroscopeController.py:
   - Added USEQ.MDASequence support: [Read-Here](https://pymmcore-plus.github.io/pymmcore-plus/guides/mda_engine/)
   - Added a movie collection function, capable of handling frame rates of up to 600 fps at 144 x 144 movies, 150 fps at 1152 x 1152 movies
+  - Added a joint USEQ.MDASequence/movie collection function, for MDA based image acquisition
+  - Implemented low latency movement before collection, to measure movement jitter in stages
 
 ## Added StageRinging.py:
   - Example script
