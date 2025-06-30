@@ -12,6 +12,7 @@
 ### GeneratesCMOSCalibrationData.py
   - Remove extraneous, commented out code
   - Clean up some of the debug outputs
+  - Remove the old hard-wired based directory search method with the GL based file explorer search as default behaviour for all functions
 ### ImageProcessing.py
 ### MicroscopeController.py
   - Clean up some debug outputs
