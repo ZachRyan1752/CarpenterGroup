@@ -23,6 +23,7 @@
 ## Implementation
 ### General
   - Create a default directory folder, where the calibrations files, raw data files, etc. directories are stored, so they dont have to be manually inputted every time
+  - Remove all XML and replace with .csv
 ### GeneralLibrary.py
   - Add a preserve root structure option to a function that scans for files or directories
     - Scan for files you want to process in a head folder, then recreate that subfile format in the data deposition directory
