@@ -21,6 +21,8 @@
 
 ## Implementation
 ### GeneralLibrary.py
+  - Add a preserve root structure option to a function that scans for files or directories
+    - Scan for files you want to process in a head folder, then recreate that subfile format in the data deposition directory
 ### GeneratesCMOSCalibrationData.py
   - Add automatic output of histograms like manufacturers provide for gain calibration code
   - Remove OPENCV2 from spatial calibration code
@@ -28,6 +30,8 @@
 
 ### ImageProcessing.py
 ### MicroscopeController.py
+  - Add an events based microscope controller system
+  - Add autodetection of all connected devices, and subsequent autoconfiguration of the config file, for when you dont want to use EVERY device all at once
 ### Fits.py
 ### Graphing.py
 
