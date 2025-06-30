@@ -14,6 +14,7 @@
   - Clean up some of the debug outputs
   - Remove the old hard-wired based directory search method with the GL based file explorer search as default behaviour for all functions
 ### ImageProcessing.py
+  - Remove various wrapper functions and extraneous code related to concurrent.futures
 ### MicroscopeController.py
   - Clean up some debug outputs
   - Remove extransous, commented out code
