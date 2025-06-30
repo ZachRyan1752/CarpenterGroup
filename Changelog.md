@@ -23,6 +23,9 @@
 ### GeneralLibrary.py
   - Add a preserve root structure option to a function that scans for files or directories
     - Scan for files you want to process in a head folder, then recreate that subfile format in the data deposition directory
+   
+  - Add a format for file name function
+    - Takes some input variable or string, then it removes characters not suitable for file names and returns the string
 ### GeneratesCMOSCalibrationData.py
   - Add automatic output of histograms like manufacturers provide for gain calibration code
   - Remove OPENCV2 from spatial calibration code
