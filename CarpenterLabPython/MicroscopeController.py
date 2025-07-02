@@ -6,6 +6,7 @@ from datetime import datetime
 from dicttoxml import dicttoxml
 import numpy as np
 import useq
+from useq import MDAEvent, MDASequence
 #import pycromanager as PM
 import time
 import pandas as pd
@@ -61,6 +62,7 @@ class ImagingSystem():
 
         self.Position = self.GetStagePosition() ## Getting the position of the stage
         self.Stage = self.mmc.getXYStageDevice()
+        self.mmc.setCircularBufferMemoryFootprint(16384) ## Size of the circular buffer (Stores images from continuous acquisitions)
 
         ## Indexes for where in the stage scanning algorithm it is
         self.MoveInPatternIndicies = [0,0,0]
@@ -78,7 +80,21 @@ class ImagingSystem():
             print(self.mmc.getVersionInfo()) # gives: 'MMCore version 11.5.0'
             print(self.mmc.getAPIVersionInfo()) # gives: 'Device API version 73, Module API version 10'
             print(self.mmc.getLoadedDevices()) # Returns loaded devices
+            print(self.mmc.getCameraChannelNames())
 
+        ## Various "Fixes"
+        ## https://forum.image.sc/t/micro-manager-become-extremely-slow/104862
+        #self.mmc.setChannelGroup("")
+
+        @self.mmc.mda.events.frameReady.connect ## When a MDA frameReady event occurs
+        def on_frame(image: np.ndarray, event: useq.MDAEvent):
+            time.sleep(self.MovementDelay)
+            #print(self.MDApositions)
+            self.StartTimens = time.time_ns()
+            Movie = self.CollectMovie(self.ExposureTime, self.FPS, self.Duration, Position = self.MDApositions[0], **self.kwargspassthrough) ## Directly pass the movement coordinates to the collect movie function to reduce delay
+            tifffile.imwrite(self.MovieNamesTemp[0],Movie)
+            self.MovieNamesTemp.pop(0)
+            self.MDApositions.pop(0) ## Remove the position from the array, to prevent double moving
 
     def GetStagePosition(self): ## Saves the new position internally, then outputs a list containing the X, Y, and Z positions of the stage
         XPos = self.mmc.getXPosition()
@@ -124,9 +140,23 @@ class ImagingSystem():
     def GetCameraDevice(self):
         return self.CameraDevice
 
+    def SetInternalCollectionSettings(self,**kwargs):
+        self.ExposureTime = kwargs.get("Exposure",100)
+        self.FrameSize = kwargs.get("FrameSize", [2304,2304])
+        self.CropType = kwargs.get("CropType", "Centered")
 
     def CaptureImage(self,SaveState,**kwargs):
         ExposureTime = kwargs.get("Exposure",100)
+        FrameSize = kwargs.get("FrameSize", [2304,2304])
+        CropType = kwargs.get("CropType", "Centered")
+
+        Settings = kwargs.get("SettingsFrom", "External")
+
+        if Settings == "Internal":
+            ExposureTime = self.ExposureTime
+            FrameSize = self.FrameSize
+            CropType = self.CropType
+
         ## Save State:
         ## 1) "Save"
         ## Saves the image to the listed directory
@@ -153,6 +183,23 @@ class ImagingSystem():
         Image = ImageData[0]
         MetaData = ImageData[1]
 
+
+        if CropType == "Origin":
+            Image = Image[FrameSize[0],FrameSize[1]]
+    
+        if CropType == "Centered":
+            Shape = np.shape(Image)
+            CenterX = int(1/2*Shape[0])
+            CenterY = int(1/2*Shape[1])
+
+            CropXMin = int(CenterX - 1/2 * FrameSize[0])
+            CropXMax = int(CenterX + 1/2 * FrameSize[0])
+            CropYMin = int(CenterY - 1/2 * FrameSize[1])
+            CropYMax = int(CenterY + 1/2 * FrameSize[1])
+
+            Image = Image[CropXMin:CropXMax,CropYMin:CropYMax]
+
+        
         if SaveState == "Save":
             OME_Xml = dicttoxml(MetaData)
             tifffile.imwrite(ImageName, Image, description = OME_Xml, metadata = None)
@@ -165,7 +212,158 @@ class ImagingSystem():
             tifffile.imwrite(ImageName, Image, description = OME_Xml, metadata = None)
             return Image, MetaData
 
-    def CaptureMovie(self,SaveState,framerate,exposuretime,duration,Iterator):
+    def RunMDA(self, MDASequence):
+        self.FrameBuffer = []
+        @self.mmc.mda.events.frameReady.connect
+        def on_frame(image: np.ndarray, event: useq.MDAEvent):
+            self.FrameBuffer.append(image)
+
+        self.mmc.run_mda(MDASequence)
+
+    def CollectMovie(self, ExposureTime, FPS, Duration, **kwargs):
+        
+        ROI = kwargs.get("ROI", [0,0,2304,2304])
+        StepTo = kwargs.get("Position", ["X","X","X"])
+
+        #ROI = kwargs.get("ROI", "Default")
+        #if ROI != "Default": ## This takes almost 180 ms to execute, do it before we call to start the move to prevent delays
+        #    self.mmc.setROI(ROI[0],ROI[1],ROI[2],ROI[3])
+
+
+        #self.mmc.setExposure(ExposureTime) ## Set exposure time now to reduce delay
+        FramesToCollect = Duration * FPS
+
+        if StepTo != ["X","X","X"]:
+            self.MoveStage(StepTo)
+            
+
+        
+        self.EndTimens = time.time_ns()
+        print("%s us Movement delay" % ((self.EndTimens - self.StartTimens) / 1000))
+        #print(self.EndTimens - self.StartTimens)
+        #print(Duration*FPS, ExposureTime)
+        self.mmc.startSequenceAcquisition(Duration*FPS, ExposureTime, True)
+        start = time.time()
+        while self.mmc.isSequenceRunning(): ## https://sourceforge.net/p/micro-manager/mailman/micro-manager-general/thread/03A4DB6AE86963478C9EB15787545DA23E39DC1A%40BE-EXCH-01.andortech.net/
+            pass
+        
+        stop = time.time()
+        delta = stop - start
+        print(delta, FramesToCollect/delta)
+        #self.mmc.stopSequenceAcquisition()
+        
+        MovieSlices = list()
+        while self.mmc.getRemainingImageCount() > 0: ## This needs to be done while acquisition happens or the "circular buffer" will over flow
+            if len(MovieSlices) == FramesToCollect:
+                break
+            else:
+                ImageData = self.mmc.popNextImage()
+                ImageData = ImageData.astype(np.int32)
+                MovieSlices.append(ImageData.astype(np.int32))
+        
+        AssembledMovie = np.stack(MovieSlices,axis=0)
+        #AssembledMovie = AssembledMovie.reshape((FramesToCollect,ROI[2],ROI[3]))
+        
+        print("Movie Shape: %s" % ([np.shape(AssembledMovie)]))
+        
+        self.mmc.clearCircularBuffer() ## Remove any old frames that arent from the current movie
+        #time.sleep(2)
+
+        return AssembledMovie
+        
+
+
+    def MDAMovieSequence(self, ExposureTime, Duration, FPS, MovieNames, **kwargs):
+        CL = self.GetStagePosition()
+        CurrentLocation = [(CL[0],CL[1],CL[2])] ## Wrapped tuple, so it can be unpacked correctly
+
+        self.ExposureTime = ExposureTime
+        self.Duration = Duration
+        self.FPS = FPS
+
+        ROI = kwargs.get("ROI", "Default")
+        if ROI != "Default": ## This takes almost 180 ms to execute, do it before we call to start the move to prevent delays
+            self.mmc.setROI(ROI[0],ROI[1],ROI[2],ROI[3])
+        
+        self.MDApositions = kwargs.get("Positions", CurrentLocation)
+        self.MovementDelay = kwargs.get("Delay", 0)
+
+        #self.MovieNamesTemp = []
+        self.MovieNamesTemp = [*MovieNames]
+
+        self.mmc.setExposure(ExposureTime)
+
+        self.kwargspassthrough = kwargs
+        DefaultSequence = MDASequence(
+            config = {"config": "HammamatsuCam", "exposure": 0.01}, ## Exposure time is set to zero, as we arent actually intending to collect any data at this time
+            time_plan = {"interval": 0.01, "loops": len(self.MDApositions)} ## Collect at every position
+            #stage_positions = [*positions]
+            #time_plan = {"interval": 1 / FPS, "loops": Duration * FPS},
+            )
+
+        Sequence = kwargs.get("Sequence", DefaultSequence)
+
+        #self.mmc.setExposure(0)
+        self.mmc.setExposure(ExposureTime) ## Set exposure time now to reduce delay
+
+
+
+        
+        self.mmc.mda.run(Sequence) ## We dont want this running in another thread based on my method
+
+
+        print("Sequence Done")
+
+    def GenerateSquareLoopReverseReturnDiagonalSequence(self, Position, StepSize):
+        Positions = []
+        
+        Pos = Position
+
+        Positions.append((Pos[0],Pos[1],Pos[2]))
+        Positions.append((Pos[0]+StepSize,Pos[1],Pos[2]))
+        Positions.append((Pos[0]+StepSize,Pos[1]+StepSize,Pos[2]))
+        Positions.append((Pos[0],Pos[1]+StepSize,Pos[2]))
+        Positions.append((Pos[0],Pos[1],Pos[2]))
+        Positions.append((Pos[0],Pos[1]+StepSize,Pos[2]))
+        Positions.append((Pos[0]+StepSize,Pos[1]+StepSize,Pos[2]))
+        Positions.append((Pos[0]+StepSize,Pos[1],Pos[2]))
+        Positions.append((Pos[0],Pos[1],Pos[2]))
+        Positions.append((Pos[0]+StepSize,Pos[1]+StepSize,Pos[2]))
+        Positions.append((Pos[0],Pos[1],Pos[2]))
+
+        return Positions
+
+
+
+
+
+
+
+
+        
+    def CaptureMovie(self,SaveState,duration,Iterator,**kwargs):
+        Time = GetFormattedHSAP()
+        PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
+
+        ExposureTime = kwargs.get("Exposure",100)
+        FrameSize = kwargs.get("FrameSize", [2304,2304])
+        CropType = kwargs.get("CropType", "Centered")
+        MovieName = kwargs.get("MovieName", "_" + Time + "_" + PositionString  + str(Iterator) + ".tiff")
+        Settings = kwargs.get("SettingsFrom", "External")
+
+        ROI = kwargs.get("ROI", "Default")
+
+        if ROI != "Default":
+
+            self.mmc.setROI(ROI[0],ROI[1],ROI[2],ROI[3])
+
+        MovieName = self.ExtractedFolderPath + MovieName
+
+        if Settings == "Internal":
+            ExposureTime = self.ExposureTime
+            FrameSize = self.FrameSize
+            CropType = self.CropType
+
         Iterator = str(Iterator)
         ## Save State:
         ## 1) "Save"
@@ -174,33 +372,33 @@ class ImagingSystem():
         ## Returns the image and relevant metadata
         ## 3) SaveAndReturn
         ## Does both
-        AssembledMovie = np.empty([0,2304,2304])
-        Time = GetFormattedHSAP()
-        PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
-        MovieName = self.ExtractedFolderPath + "_" + Time + "_" + PositionString  + Iterator + ".tiff"
-    
-        self.mmc.snapImage() ## THIS RETURNS A FLOAT64 DATA TYPE ARRAY THAT IMAGE J CANNOT READ WHEN IT IS STACKED INTO A MOVIE!!
-        ImageData = self.mmc.getTaggedImage()
-        MetaData = ImageData[1] ## Collecting an image for the metadata
 
-        MovieSlices = list()
 
-        PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
-        ImageName = self.ExtractedFolderPath + "_" + Time + "_" + PositionString  + Iterator + ".tiff"
+        #PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
+        #ImageName = self.ExtractedFolderPath + "_" + Time + "_" + PositionString  + Iterator + ".tiff"
 
-        Interval = 1/framerate
-        FramesToCollect = int(framerate * duration)
+        Interval = ExposureTime
+        FramesToCollect = int(1/ExposureTime * 1000 * duration)
+        print(FramesToCollect)
         CameraDevice = self.mmc.getCameraDevice()
         self.mmc.setCameraDevice(CameraDevice)
-        self.mmc.setExposure(CameraDevice,Interval*1000) ## IN MILLISECONDS!!
-        self.mmc.setCircularBufferMemoryFootprint(16384) ## Size of the circular buffer (Stores images from continuous acquisitions)
 
-        self.mmc.startContinuousSequenceAcquisition(0)
+        self.mmc.setExposure(CameraDevice,ExposureTime) ## IN MILLISECONDS!!
+        #self.mmc.setCircularBufferMemoryFootprint(16384) ## Size of the circular buffer (Stores images from continuous acquisitions)
+
+
         start_time = time.time()
-        while time.time() - start_time < duration + Interval: ## Ensures that the movie is exactly the right length, but this can also be done concurrently
+        self.mmc.startSequenceAcquisition(FramesToCollect, Interval, True)
+        while self.mmc.isSequenceRunning(): ## https://sourceforge.net/p/micro-manager/mailman/micro-manager-general/thread/03A4DB6AE86963478C9EB15787545DA23E39DC1A%40BE-EXCH-01.andortech.net/
             pass
+        #self.mmc.startContinuousSequenceAcquisition(1)
+        #while time.time() - start_time < duration + Interval: ## Ensures that the movie is exactly the right length, but this can also be done concurrently
+        #    pass
+        delta = time.time() - start_time
         self.mmc.stopSequenceAcquisition()
-    
+        
+        MovieSlices = list()
+
         while self.mmc.getRemainingImageCount() > 0: ## This needs to be done while acquisition happens or the "circular buffer" will over flow
             if len(MovieSlices) == FramesToCollect:
                 break
@@ -213,28 +411,59 @@ class ImagingSystem():
         if np.shape(AssembledMovie)[0] != FramesToCollect:
             print(np.shape(AssembledMovie))
         else:
-            AssembledMovie = AssembledMovie.reshape((FramesToCollect,2304,2304))
+            AssembledMovie = AssembledMovie.reshape((FramesToCollect,ROI[2],ROI[3]))
         print("Movie Shape: %s" % ([np.shape(AssembledMovie)]))
         
         self.mmc.clearCircularBuffer() ## Remove any old frames that arent from the current movie
         
-        PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
-        ImageName = self.ExtractedFolderPath + "_" + Time + "_" + PositionString  + Iterator + ".tiff"
+        self.mmc.snapImage() ## THIS RETURNS A FLOAT64 DATA TYPE ARRAY THAT IMAGE J CANNOT READ WHEN IT IS STACKED INTO A MOVIE!!
+        ImageData = self.mmc.getTaggedImage()
+        MetaData = ImageData[1] ## Collecting an image for the metadata
+
+
+
+
+        #PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
+        #ImageName = self.ExtractedFolderPath + "_" + Time + "_" + PositionString  + Iterator + ".tiff"
+
+        if CropType == "Origin":
+            Image = Image[FrameSize[0],FrameSize[1]]
+    
+        if CropType == "Centered":
+            Shape = np.shape(AssembledMovie)
+            CenterX = int(1/2*Shape[1])
+            CenterY = int(1/2*Shape[2])
+
+            CropXMin = int(CenterX - 1/2 * FrameSize[0])
+            CropXMax = int(CenterX + 1/2 * FrameSize[0])
+            CropYMin = int(CenterY - 1/2 * FrameSize[1])
+            CropYMax = int(CenterY + 1/2 * FrameSize[1])
+
+            AssembledMovie = AssembledMovie[:,CropXMin:CropXMax,CropYMin:CropYMax]
+
+
 
         if SaveState == "Save":
             OME_Xml = dicttoxml(MetaData)
-            tifffile.imwrite(ImageName, AssembledMovie, imagej = True)
+            #print(OME_Xml)
+            tifffile.imwrite(MovieName, AssembledMovie.astype(np.float32))
 
         if SaveState == "Return":
             return AssembledMovie, MetaData
     
         if SaveState == "SaveAndReturn":
             OME_Xml = dicttoxml(MetaData)
-            tifffile.imwrite(ImageName, AssembledMovie, imagej = True)
+            #print(OME_Xml)
+            tifffile.imwrite(MovieName, AssembledMovie.astype(np.float32))
             return AssembledMovie, MetaData
+        
+        AverageFrameTime = delta / np.shape(AssembledMovie)[0]
+        print("Total Time: %s, Expected Time: %s, Average Frame Time: %s, Average Frame Rate: %s" % (delta, duration, AverageFrameTime, 1 / AverageFrameTime))
 
 
     def FocusStep(self,Offset,Iterator,stepsize,steps,name,**kwargs): ## Find focus via maximum peak brightness
+        Method = kwargs.get("Method","BestGaussianFit")
+        
         ## Method based on: https://www.csl.cornell.edu/~cbatten/pdfs/batten-image-processing-sem-slides-scanning2001.pdf
         ## https://www.statology.org/autocorrelation-python/
         ## http://hahnlab.com/downloads/protocols/2006%20Methods%20Enzym-Shen%20414%20Chapter%2032-opt.pdf
@@ -269,11 +498,11 @@ class ImagingSystem():
             Position = self.GetStagePosition() ## Get the position
 
             ## Averaging 5 images
-            Image1, MD = self.CaptureImage("Return") ## Get an image
+            Image1, MD = self.CaptureImage("Return", Settings = "Internal") ## Get an image
             Image = Image1
 
             ImageStack = np.vstack((ImageStack,Image[None])) ## [None] adds a third array to enable this kind of stacking
-            Variance = np.max(Image)
+            Variance = np.var(Image)
             FocusMetric = np.array([Position[2]])
             Variance = np.array([Variance])
             FocusArray = np.vstack((FocusArray, FocusMetric))
@@ -286,142 +515,123 @@ class ImagingSystem():
                 #print(x)
             
             else:
-                PeakPickingSettings = (100, 13) ## Minimum peak height, minimum distance between peaks
-                PeakGroupingSettings = (4,0) ## How close can peaks be across frames before they are considered the same peak
-                PeakFittingSettings = (13,0) ## PSF distance (will be fit over this 2*distance)
+                if Method == "BestGaussianFit":
+                    PeakPickingSettings = (100, 13) ## Minimum peak height, minimum distance between peaks
+                    PeakGroupingSettings = (4,0) ## How close can peaks be across frames before they are considered the same peak
+                    PeakFittingSettings = (13,0) ## PSF distance (will be fit over this 2*distance)
 
-                ImageStack = ImageStack.astype(np.int32)
-                #CreateIfNotExist(self.ExtractedFolderPath + "Movie%s/" % self.MovieNumber)
-                #tifffile.imwrite(self.ExtractedFolderPath + "Movie%s/Image.tif" % self.MovieNumber, ImageStack)
+                    ImageStack = ImageStack.astype(np.int32)
+                    #CreateIfNotExist(self.ExtractedFolderPath + "Movie%s/" % self.MovieNumber)
+                    #tifffile.imwrite(self.ExtractedFolderPath + "Movie%s/Image.tif" % self.MovieNumber, ImageStack)
 
-                TotalPeakList = []
-                for Frames in ImageStack:
-                    Frame, PeakList, GradientX = IP.GetPeaksByGradient(Frames, 0)
-                    for Peaks in PeakList:
-                        TotalPeakList.append(Peaks)
+                    TotalPeakList = []
+                    for Frames in ImageStack:
+                        Frame, PeakList, GradientX = IP.GetPeaksByGradient(Frames, 0)
+                        for Peaks in PeakList:
+                            TotalPeakList.append(Peaks)
 
-                OrganizedPeaks = IP.OrganizePeaksThroughTime(TotalPeakList, PeakGroupingSettings)
+                    OrganizedPeaks = IP.OrganizePeaksThroughTime(TotalPeakList, PeakGroupingSettings)
                 
-                OrganizedPeaks = OrganizedPeaks[0:5]
+                    OrganizedPeaks = OrganizedPeaks[0:5]
 
-                PSF = 5
-                xaxis = np.linspace(0,PSF,PSF)
-                yaxis = np.linspace(0,PSF,PSF)
-                xaxis, yaxis = np.meshgrid(xaxis, yaxis)
-                FinalizedData = []
-                for Peaks in OrganizedPeaks:
-                    PeakData = []
-                    MovieToFit = ImageStack[:][int(Peaks[2]-PSF):int(Peaks[2]+PSF),int(Peaks[3]-PSF):int(Peaks[3]+PSF)]
-                    for Frames in MovieToFit:                    
-                        try:
-                            popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), Frames.ravel())
-                            PeakData.append([*popt])
-                        except:
-                            pass
-                    FinalizedData.append(PeakData)
+                    PSF = 5
+                    xaxis = np.linspace(0,PSF,PSF)
+                    yaxis = np.linspace(0,PSF,PSF)
+                    xaxis, yaxis = np.meshgrid(xaxis, yaxis)
+                    FinalizedData = []
+                    for Peaks in OrganizedPeaks:
+                        PeakData = []
+                        MovieToFit = ImageStack[:][int(Peaks[2]-PSF):int(Peaks[2]+PSF),int(Peaks[3]-PSF):int(Peaks[3]+PSF)]
+                        for Frames in MovieToFit:                    
+                            try:
+                                popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), Frames.ravel())
+                                PeakData.append([*popt])
+                            except:
+                                pass
+                        FinalizedData.append(PeakData)
 
-                FinalizedData = np.array(FinalizedData)
-                print(FinalizedData)
+                    FinalizedData = np.array(FinalizedData)
+                    print(FinalizedData)
                 
-                #MovieObject = IP.Movie29_05_2025(ImageStack, np.zeros(np.shape(ImageStack)), self.ExtractedFolderPath+"Movie%s/" % self.MovieNumber, PeakPickingSettings, PeakGroupingSettings, PeakFittingSettings)
-
-                #MovieObject.GetPeaksByGradient()
-
-                #MovieObject.OrganizePeaksThroughTime()
+             
                 
-                #MovieObject.FitPeaksOverMovie()
-                
-                #PeaksMovie = IP.Movie("FocusMovie", name + "FocusMovie",self.ExtractedFolderPath + "/AutoFocus" + str(self.MovieNumber) + "/",SettingsPeakPicking,SettingsFitting,SettingsFit,SettingsPeakGrouping,SettingsConversionFactors,ForceLoad = True, Movie = ImageStack )
-                #PeaksMovie.GetPeaks()
-                #PeaksMovie.SortPeakArrayByHeight()
-                #PeaksMovie.FilterPeaks()
-                
-                #PeaksMovie.OrganizePeaksThroughTimeNew()
-
-                #PeaksMovie.TruncatePeakList()
-                #PeaksMovie.FitPeaksOverMovie()
-                
-                #PeaksMovie.FilterPeakFits()
-                #PeaksMovie.RefitBadFits()
-                
-                
-                #PeaksMovie.FinalizePeaks()
-
-                #FinalizedData = PeaksMovie.GetFinalizedPeakArray()
-                #FinalizedData = PeaksMovie.GetFittedPeaks()
-
-                #Shape1, Shape2, Shape3, Shape4, Shape5, Shape6 = PeaksMovie.GetPeakArrayShapes()
-                ZValuesArray = FocusArray
-                IteratorFocus = 0
-                while IteratorFocus < np.shape(FinalizedData)[0] / np.shape(FocusArray)[0] - 1:
-                    ZValuesArray = np.vstack((ZValuesArray,FocusArray))
-
-                    IteratorFocus += 1
-
-                FinalizedData = np.hstack((ZValuesArray,FinalizedData))
-
-
-                if self.FocusStepDebug == True:
-                    IP.WriteCsv2D_Data(FinalizedData,self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/",name + ".csv",["Z-Position","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-                #IP.WriteCsv2D_Data(FinDataArrayStacked,self.DataFolderPath + "/AutoFocus" + Iterator + "/",name + ".csv",["Z-Position","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-                
-
-                AverageFocus = np.empty((0))
-                #["Z-Height","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"]
-                DataArray = []
-                #print("Big Data: %s" % (np.shape(FinalizedData)[0]))
-                for DataPoints in FinalizedData: ## Discard poorly fitted data
-                    Discard = False
-                    DataToCheck = [DataPoints[0],1,DataPoints[3],DataPoints[4],(DataPoints[3]+DataPoints[4])/2] ## Z-Position, R2, Sigma X, Sigma Y, Average of Sigma X and Sigma Y
+                    ZValuesArray = FocusArray
+                    IteratorFocus = 0
+                    while IteratorFocus < np.shape(FinalizedData)[0] / np.shape(FocusArray)[0] - 1:
+                        ZValuesArray = np.vstack((ZValuesArray,FocusArray))
+    
+                        IteratorFocus += 1
+    
+                    FinalizedData = np.hstack((ZValuesArray,FinalizedData))
+    
+    
+                    if self.FocusStepDebug == True:
+                        IP.WriteCsv2D_Data(FinalizedData,self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/",name + ".csv",["Z-Position","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
+                    #IP.WriteCsv2D_Data(FinDataArrayStacked,self.DataFolderPath + "/AutoFocus" + Iterator + "/",name + ".csv",["Z-Position","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
                     
-                    if DataToCheck[1] < 0.85:
-                        #print(DataToCheck)
-                        Discard = True
+    
+                    AverageFocus = np.empty((0))
+                    #["Z-Height","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"]
+                    DataArray = []
+                    #print("Big Data: %s" % (np.shape(FinalizedData)[0]))
+                    for DataPoints in FinalizedData: ## Discard poorly fitted data
+                        Discard = False
+                        DataToCheck = [DataPoints[0],1,DataPoints[3],DataPoints[4],(DataPoints[3]+DataPoints[4])/2] ## Z-Position, R2, Sigma X, Sigma Y, Average of Sigma X and Sigma Y
+                        
+                        if DataToCheck[1] < 0.85:
+                            #print(DataToCheck)
+                            Discard = True
+                        
+                        if DataToCheck[1] > 1:
+                            Discard = True
+    
+                        if Discard == False:
+                            DataArray.append(DataToCheck)
+                            #print(DataToCheck)
+                        #print(Discard,DataToCheck)
+    
+                    if self.FocusStepDebug == True:
+                        IP.WriteCsv2D_Data(DataArray,self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/",name + "CheckedFits.csv",["Z-Position","R2","Sigma X","Sigma Y","Average Sigma"])
+    
+                    PreviousData = [0,0,0,0,0]
+                    LowestAveSigmaArray = []
+                    LowestAveSigma = [0,100000]
                     
-                    if DataToCheck[1] > 1:
-                        Discard = True
-
-                    if Discard == False:
-                        DataArray.append(DataToCheck)
-                        #print(DataToCheck)
-                    #print(Discard,DataToCheck)
-
-                if self.FocusStepDebug == True:
-                    IP.WriteCsv2D_Data(DataArray,self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/",name + "CheckedFits.csv",["Z-Position","R2","Sigma X","Sigma Y","Average Sigma"])
-
-                PreviousData = [0,0,0,0,0]
-                LowestAveSigmaArray = []
-                LowestAveSigma = [0,100000]
-                
-                #print("Length of DataArray: %s" % len(DataArray))
-                for Data in DataArray:
-                    if Data[0] < PreviousData[0]:
-                        #print(LowestAveSigma)
-                        LowestAveSigmaArray.append(LowestAveSigma)
-                        LowestAveSigma = [0,100000]
+                    #print("Length of DataArray: %s" % len(DataArray))
+                    for Data in DataArray:
+                        if Data[0] < PreviousData[0]:
+                            #print(LowestAveSigma)
+                            LowestAveSigmaArray.append(LowestAveSigma)
+                            LowestAveSigma = [0,100000]
+                        
+                        #print(Data[4]<LowestAveSigma[1])
+                        if Data[4] < LowestAveSigma[1]:
+                            LowestAveSigma = [Data[0],Data[4]]
+                        PreviousData = Data
+    
+                    LowestAveSigmaArray.append(LowestAveSigma)
                     
-                    #print(Data[4]<LowestAveSigma[1])
-                    if Data[4] < LowestAveSigma[1]:
-                        LowestAveSigma = [Data[0],Data[4]]
-                    PreviousData = Data
+                    AverageZPosition = 0
+                    FociCount = 0
+                    for Foci in LowestAveSigmaArray:
+                        AverageZPosition = AverageZPosition + Foci[0]
+                        FociCount += 1
+                    
+                    AverageZPosition = AverageZPosition / FociCount
+                    print("Average Z Position: %s" % AverageZPosition)
+    
+                    FocusArrayVariance = np.hstack((FocusArray,VarianceArray))
+                    
+                    
+                    MaxVariance = np.max(VarianceArray)
+                    MaxFocusPos = np.where(MaxVariance == VarianceArray)
+                    MaxFocus = FocusArray[MaxFocusPos]
+                
+                if Method == "HighestVariance":
+                    FocusPos = np.where(np.max(VarianceArray) == VarianceArray)
+                    AverageZPosition = FocusArray[FocusPos]
 
-                LowestAveSigmaArray.append(LowestAveSigma)
-                
-                AverageZPosition = 0
-                FociCount = 0
-                for Foci in LowestAveSigmaArray:
-                    AverageZPosition = AverageZPosition + Foci[0]
-                    FociCount += 1
-                
-                AverageZPosition = AverageZPosition / FociCount
-                print("Average Z Position: %s" % AverageZPosition)
 
-                FocusArrayVariance = np.hstack((FocusArray,VarianceArray))
-                
-                
-                MaxVariance = np.max(VarianceArray)
-                MaxFocusPos = np.where(MaxVariance == VarianceArray)
-                MaxFocus = FocusArray[MaxFocusPos]
                 #print(MaxFocus[0])
 
                 #np.savetxt(ImageName,FocusArrayVariance,delimiter = ",")
@@ -447,11 +657,12 @@ class ImagingSystem():
 
     def FocusInStagesByOffset(self,Offset,Iterator,**kwargs):
         self.FocusDebug = kwargs.get("Debug","False")
+        MethodName = kwargs.get("Method","BestGaussianFit")
 
         Iterator = str(Iterator)
         if self.FocusDebug == True:
             Time = GetFormattedHSAP()
-            BeforeImage, MD = self.CaptureImage("Return") ## Before Picture
+            BeforeImage, MD = self.CaptureImage("Return",Settings = "Internal") ## Before Picture
             PositionString = "%s_%s_%s_" % (np.round(self.Position[0],3),np.round(self.Position[1],3),np.round(self.Position[2],3))
             ImageName = self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/BeforeFocus.tiff"
             FolderName = self.ExtractedFolderPath + "/AutoFocus" + Iterator + '/'
@@ -461,7 +672,7 @@ class ImagingSystem():
         
         stepsize = 0.3 ## In micron, keep this relatively narrow, and hope your sample is flat otherwise inversion of contrast effects will ruin this function.
         steps = 19 ## In count
-        FocusRough, ImageStackRough = self.FocusStep(Offset,Iterator,stepsize,steps,"Rough",Debug = self.FocusDebug)
+        FocusRough, ImageStackRough = self.FocusStep(Offset,Iterator,stepsize,steps,"Rough",Debug = self.FocusDebug, Method = MethodName)
         if self.FocusDebug == True:
             ImageName = self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/RoughImageStack.tiff"
             tifffile.imwrite(ImageName, ImageStackRough, compression = None, imagej = True)        
@@ -469,7 +680,7 @@ class ImagingSystem():
 
         stepsize = 0.05 ## In micron
         steps = 24 ## In count
-        FocusCoarse, ImageStackCoarse = self.FocusStep(Offset,Iterator,stepsize,steps,"Coarse",Debug = self.FocusDebug)
+        FocusCoarse, ImageStackCoarse = self.FocusStep(Offset,Iterator,stepsize,steps,"Coarse",Debug = self.FocusDebug, Method = MethodName)
         if self.FocusDebug == True:
             ImageName = self.ExtractedFolderPath + "/AutoFocus" + Iterator + "/CoarseImageStack.tiff"
             tifffile.imwrite(ImageName, ImageStackCoarse, compression = None, imagej = True)
@@ -478,9 +689,17 @@ class ImagingSystem():
         self.FocusPosition = FocusCoarse
         return FocusCoarse
 
+    def MoveByPositions(self, PositionArray):
+
+        self.MoveStage(PositionArray[0])
+        PositionArray.pop(0)
+
+        return PositionArray
+
     def MoveInPattern(self, Function, Vars, RandomOffsetRange, **kwargs):
 
         AutofocusZ = kwargs.get("Autofocus", False)
+        AutofocusMethod = kwargs.get("Method","BestGaussianFit")
 
         XVar = Vars[0]
         YVar = Vars[1]
@@ -504,7 +723,7 @@ class ImagingSystem():
 
             if AutofocusZ == True:
                 Offset = [0.5,0.5,0]
-                FocusSpot, ImageStack = self.FocusInStagesByOffset(Offset,self.MovieNumber,**kwargs)
+                FocusSpot, ImageStack = self.FocusInStagesByOffset(Offset,self.MovieNumber,Method = AutofocusMethod, **kwargs)
                 return Incomplete, FocusSpot
 
             self.MoveInPatternLengths = [len(self.XRange), len(self.YRange), len(self.ZRange)]
@@ -543,7 +762,7 @@ class ImagingSystem():
 
             if AutofocusZ == True:
                 Offset = [0.5,0.5,0]
-                FocusSpot, ImageStack = self.FocusInStagesByOffset(Offset,self.MovieNumber,**kwargs)
+                FocusSpot, ImageStack = self.FocusInStagesByOffset(Offset,self.MovieNumber,Method = AutofocusMethod,**kwargs)
                 self.MoveStageWithErrorCorrection([self.XRange[Inx[0]],self.YRange[Inx[1]],FocusSpot])
                 self.Iterator += 1
                 return Incomplete, FocusSpot
@@ -555,6 +774,71 @@ class ImagingSystem():
             
         Incomplete = "Incomplete"
         return Incomplete
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    def CaptureMDATimeSequence(self,ExposureTime, Duration, FPS, **kwargs):
+        ROI = kwargs.get("ROI", "Default")
+
+        if ROI != "Default":
+
+            self.mmc.setROI(ROI[0],ROI[1],ROI[2],ROI[3])
+
+        self.mmc.setExposure(ExposureTime)
+        
+        ## https://pymmcore-plus.github.io/pymmcore-plus/guides/mda_engine/
+        self.FrameBuffer = []
+
+        @self.mmc.mda.events.frameReady.connect
+        def on_frame(image: np.ndarray, event: useq.MDAEvent):
+            self.FrameBuffer.append(image)
+
+
+        Sequence = MDASequence(
+            config = {"config": "HammamatsuCam", "exposure": ExposureTime},
+            time_plan = {"interval": 1 / FPS, "loops": Duration * FPS},
+        )
+
+        FramesToCollect = Duration * FPS
+
+        start_time = time.time()
+        
+        self.mmc.run_mda(Sequence)
+        
+        
+        while len(self.FrameBuffer) != FramesToCollect:
+            pass
+
+        stop_time = time.time()
+        delta = stop_time - start_time
+
+        print("Time: %s, Average FPS: %s, Desired FPS: %s" % (delta, delta / FramesToCollect, FPS))
+
+        AssembledMovie = np.array(self.FrameBuffer)
+        #print(np.shape(AssembledMovie))
+        #while self.mmc.isSequenceRunning() == True:
+        #    pass    
+            
+        #AssembledMovie = np.stack(self.FrameBuffer,axis=0)
+        #AssembledMovie = self.FrameBuffer.reshape((FramesToCollect,ROI[2],ROI[3]))
+
+        #self.FrameBuffer = []
+
+        return AssembledMovie.astype(np.float32)
+
+
 
 
 

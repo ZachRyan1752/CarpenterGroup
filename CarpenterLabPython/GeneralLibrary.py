@@ -13,23 +13,11 @@ import cv2
 import math
 from bs4 import BeautifulSoup
 import csv
+from tkinter import filedialog
+import tkinter
 
 # Defs
-def GetFormattedYMDHSAP():
-    ## Returns the date and time in string format of Year_Month_Day_Hour_Minute_AM/PM
-    DateAndTime = datetime.datetime.now()
-    DateAndTimeFormatted = datetime.datetime.strftime(DateAndTime,"20%y_%m_%d_%I_%M_%p")
-    return DateAndTimeFormatted
-
-
-def CreateIfNotExist(Path):
-    ## Checks if a folder exists, if it does not, it creates it
-    if os.path.exists(Path):
-        pass
-    else:
-        os.mkdir(Path)
-
-
+## Searching for data on the computer
 def ScanForFilesInPathByTag(Path, Tag):
     ## Returns the paths of files within a directory with a certain tag present
     TaggedFiles = []
@@ -38,6 +26,65 @@ def ScanForFilesInPathByTag(Path, Tag):
             TaggedFiles.append(Files)
 
     return TaggedFiles
+
+def AskForDirectory(**kwargs):
+    ## https://stackoverflow.com/questions/66663179/how-to-use-windows-file-explorer-to-select-and-return-a-directory-using-python
+    ## Prompt the user with a file explorer window to select a directory
+    tkinter.Tk().withdraw()
+
+    InputMessage = kwargs.get("InputMessage","Select a Directory")
+    OutputMessage = kwargs.get("OutputMessage","Directory Selected: ")
+
+    print(InputMessage)
+
+    SelectedDirectory = filedialog.askdirectory() + "/"
+
+    print(OutputMessage + SelectedDirectory)
+
+    return SelectedDirectory
+
+def AskForFiles(**kwargs):
+    ## https://stackoverflow.com/questions/66663179/how-to-use-windows-file-explorer-to-select-and-return-a-directory-using-python
+    ## Prompt the user with a file explorer window to select files
+    tkinter.Tk().withdraw()
+
+    InputMessage = kwargs.get("InputMessage","Select Files") 
+    OutputMessage = kwargs.get("OutputMessage","Files Selected: ")
+
+    Titles = kwargs.get("Title", "Default Title")
+    FileTypes = kwargs.get("FileTypes", [("Any", "*.*")])
+
+    InputMessage = kwargs.get("DebugMessage","Select a Directory")
+    
+    SelectedFiles = filedialog.askopenfilenames(title = Titles, filetypes = FileTypes)
+
+    for FilePaths in SelectedFiles:
+        print(OutputMessage + FilePaths)
+
+    return SelectedFiles
+
+## File and directory creation
+def CreateIfNotExist(Path):
+    ## Checks if a folder exists, if it does not, it creates it
+    if os.path.exists(Path):
+        pass
+    else:
+        os.mkdir(Path)
+
+## Other
+
+
+
+def GetFormattedYMDHSAP():
+    ## Returns the date and time in string format of Year_Month_Day_Hour_Minute_AM/PM
+    DateAndTime = datetime.datetime.now()
+    DateAndTimeFormatted = datetime.datetime.strftime(DateAndTime,"20%y_%m_%d_%I_%M_%p")
+    return DateAndTimeFormatted
+
+
+
+
+
 
 def Distance(Coordinates1,Coordinates2):
     distance = math.sqrt((Coordinates2[0]-Coordinates1[0])**2+(Coordinates2[1]-Coordinates1[1])**2)
