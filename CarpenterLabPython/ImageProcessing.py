@@ -7,7 +7,6 @@ import scipy.ndimage as ndimage
 import concurrent
 
 ## Defs
-
 def GetPeaksByFrameMaximumFunction(Frame, BlankFrame, FrameNumber, PeakPickingSettings):
     ## A method of getting peaks by:
     ## 1) Find the maximum in the frame
@@ -69,10 +68,7 @@ def GetPeaksByGradient(FrameToPick, FrameNumber, FrameCount, PeakPickingSettings
     ViewWindow = PeakFittingSettings[0] #4
     
     FrameShape = np.shape(Frame)
-    
-    ## Setting the edges to a low value so peak picking doesnt occur here
 
-    
     ## Denoising the input data by applying a gaussian filter to it
     FrameDenoised = np.zeros(np.shape(Frame)) + ndimage.gaussian_filter(Frame, DenoiseSTD)
     
@@ -80,7 +76,8 @@ def GetPeaksByGradient(FrameToPick, FrameNumber, FrameCount, PeakPickingSettings
     GradientXY = np.gradient(FrameDenoised)
     GradientX = GradientXY[0]
     GradientY = GradientXY[1]
-
+    
+    ## Setting the edges to a low value so peak picking doesnt occur here
     GradientX[0:ViewWindow] = 0
     GradientX[FrameShape[0]-ViewWindow:] = 0
     GradientX[0:FrameShape[0],0:ViewWindow] = 0
@@ -170,7 +167,6 @@ def OrganizePeaksThroughTime(PickedPeaks, PeakGroupingSettings):
         OrganizedPeaks.append(Peak1Array)
         
     return OrganizedPeaks
-    #print(len(self.OrganizedPeaks))
 
 
 
@@ -179,14 +175,10 @@ def FitPeaksOverMovieFunction2(AreaToFit, PeakFitParameters, PSF, BackgroundLeve
     print("Starting Fit #%s out of %s" % (PeakNumber + 1,NumbOfPeaks))
     ## This could potentially be fixed with this: https://scipy-cookbook.readthedocs.io/items/FittingData.html
     ## Again this is split as a separate function as it is a very easily parrallizable task
-    #print(PeakFitParameters)
 
     xaxis = np.linspace(0, 2*PSF, int(2*PSF))
     yaxis = np.linspace(0, 2*PSF, int(2*PSF))
     xaxis, yaxis = np.meshgrid(xaxis, yaxis)  
-    
-    #[594, np.float64(2548.294677734375), 194, 192]
-    #print(BackgroundSum)
 
     PeakXAdjusted = PSF
     PeakYAdjusted = PSF
@@ -203,12 +195,10 @@ def FitPeaksOverMovieFunction2(AreaToFit, PeakFitParameters, PSF, BackgroundLeve
             InitialGuess = (np.max(Frames), PSF, PSF, 1.7, 1.7, 0.005, 100)
             FrameDataRaveled = Frames.ravel() ## Raveling is the flattening of an array
             FittingBound = [[np.max(Frames)*0.5,0,0,0.25,0.25,0,0],[np.max(Frames)*2,PSF*2,PSF*2,5,5,0.5,2**12]]
-            #print(FittingBound)
-            #print(np.shape(FrameDataRaveled), xaxis, yaxis)
-            #popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 1000, p0 = InitialGuess, bounds = FittingBound)
             PeakFitParameters[1] = np.max(Frames)
 
             try:
+                ## Fitting the data, wrapped in a try/except loop as sometimes it picks peaks wrong or there is just no data to fit
                 popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 500, p0 = InitialGuess, bounds = FittingBound)
                 FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
                 R2 = GL.getR2(FrameDataRaveled,FittedData)
@@ -264,7 +254,6 @@ def FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, 
     yaxis = np.linspace(0, 2*PSF, 2*PSF)
     xaxis, yaxis = np.meshgrid(xaxis, yaxis)  
 
-    #print(BackgroundSum)
     AreaSum = np.sum(AreaToFit[PeakFitParameters[0]])
 
     PeakFittingDataOverTime = []
@@ -276,8 +265,6 @@ def FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, 
             FrameDataRaveled = Frames.ravel() ## Raveling is the flattening of an array
             FittingBound = [[PeakFitParameters[1]*0.5,0,0,0.25,0.25,-0.5,0],[PeakFitParameters[1]*2,PSF*2,PSF*2,PSF,PSF,0.5,118]]
             
-            #print(np.shape(FrameDataRaveled), xaxis, yaxis)
-            #popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 1000, p0 = InitialGuess, bounds = FittingBound)
             try:
                 popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 10, p0 = InitialGuess, bounds = FittingBound)
                 FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
@@ -289,14 +276,9 @@ def FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, 
                     R2 = GL.getR2(FrameDataRaveled,FittedData)
                         
                 except:
-                #    try:
-                #        popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis, yaxis), FrameDataRaveled, maxfev = 1000, p0 = InitialGuess, bounds = FittingBound)
-                #        FittedData = fits.twoD_Gaussian((xaxis, yaxis), *popt)
-                #        R2 = GL.getR2(FrameDataRaveled,FittedData)
-                #        
-                #    except:
                     popt = [0,0,0,0,0,0,0]
                     R2 = 0
+
             PeakFitParameters[0] = FrameCounter
             popt[1] = popt[1] + PeakFitParameters[2] - PSF ## Adjusting the peak center to real coordinates
             popt[2] = popt[2] + PeakFitParameters[3] - PSF
@@ -328,6 +310,7 @@ def FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, 
 ## Classes
 class Movie29_05_2025:
     def __init__(self,MovieData,BlankData,DataOutPath,PeakPickingSettings,PeakGroupingSettings,PeakFittingSettings, **kwargs):
+        ## Initializing some internal parameters
         self.MovieData = MovieData
         self.BackgroundBlankAveraged = BlankData
         self.PeakPickingSettings = PeakPickingSettings
@@ -367,6 +350,7 @@ class Movie29_05_2025:
 
 
     def GetPeaksByGradient(self):
+        ## Getting peaks via the gradient method for each frame
         CompletePeakList = []
         EditedPickedMovie = []
         EditedGradientX = []
@@ -411,6 +395,8 @@ class Movie29_05_2025:
         self.PickedPeaks = CompletePeakList
 
     def TruncateOrganizedPeaksList(self,Number):
+        ## Truncate the peak list after they were organized through time
+        ## This is useful for testing data, or the auto focus function, where only a few peaks need to be analyzed to see a clearer picture
         self.OrganizedPeaks = self.OrganizedPeaks[0:Number]
 
 
@@ -440,10 +426,9 @@ class Movie29_05_2025:
 
             self.PickedPeaks.remove(Peak1) ## Remove the peak that was checked against so it is not checked twice
             self.OrganizedPeaks.append(Peak1Array)
-        
-        #print(len(self.OrganizedPeaks))
 
     def FitPeaksOverMovie(self):
+        ## Fitting ever peak picked and organized at every frame in the movie
         PSF = self.PeakFittingSettings[0]  
         
         BackgroundLevels = 100
@@ -466,19 +451,14 @@ class Movie29_05_2025:
             DataPool.append(Data)
             PeakNumber += 1
 
-        ## You CANNOT use this on defs belonging to a class, I use @staticmethod which isolates it from the class.
         with concurrent.futures.ProcessPoolExecutor() as executor:  ## ProcessPoolExecutor
             ## This is the hard limit for workers on windows: 
             ## See: https://github.com/python/cpython/issues/71090
             ## See: https://github.com/psf/black/issues/564
-
-
             ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
-            #ThreadReturnedData = executor.map(Movie29_05_2025.FitPeaksOverMovieFunctionWrapper, DataPool)\
             ThreadReturnedData = executor.map(FitPeaksOverMovieFunctionWrapper2, DataPool)
             FinishedProcessCounter = 0
             for PeakFittingDataOverTime in ThreadReturnedData:  
-                #print(PeakFittingDataOverTime)
                 PeakFittingOverTimeAdjusted = []
                 FitPercent = 0
                 for Data in PeakFittingDataOverTime:
@@ -491,6 +471,7 @@ class Movie29_05_2025:
                 FitPercent = np.round(FitPercent / self.FrameCount * 100, 2)
                 
                 if FitPercent > self.PeakFittingSettings[2]:
+                    ## Saving the output of the fitting to a .CSV file
                     Header = ["Frame","Height","Peak X","Peak Y","Amplitude","Peak X Fit (Pixels)", "Peak Y Fit (Pixels)", "Sigma X (nm)", "Sigma Y (nm)", "Theta (Radians)", "Offset", "R2", "AreaSum5x5", "Photoelectrons per second"]
                     GL.WriteCsv2D_Data(PeakFittingOverTimeAdjusted,self.ExtractedDataPath,"Peak%s_%sPercentFitted.csv" % (FinishedProcessCounter,FitPercent),Header)
                 
@@ -502,47 +483,12 @@ class Movie29_05_2025:
                 FinishedProcessCounter += 1
 
                 self.FittedPeaksOverTime.append(PeakFittingDataOverTime)
-                
-        
-
-
-        #for PeakArrays in self.OrganizedPeaks: ## OrganizedPeaks = [[Peak1Frame1,Peak1Frame2,...],[Peak2Frame1,Peak2Frame2,...],...]
-            #print("Fitting Peak #%s out of %s" % (PeakNumber,len(self.OrganizedPeaks)-1))
-            #PeakFitParameters = PeakArrays[0] ## Just taking the first peak fit info (the center should be the same across frames)
-            ## PeakFitParameters
-            ## Output is [Frame #, Peak Maximum, Peak X, Peak Y]
-            
-            #AreaToFit = self.MovieData[0:self.FrameCount,int(PeakFitParameters[2]-PSF):int(PeakFitParameters[2]+PSF),int(PeakFitParameters[3]-PSF):int(PeakFitParameters[3]+PSF)]
-            #PeakFittingDataOverTime = self.FitPeaksOverMovieFunction(AreaToFit, PeakFitParameters, BackgroundSum, PSF, BackgroundLevels, xaxis, yaxis)
-            #PeakFittingOverTimeAdjusted = []
-            #FitPercent = 0
-            #for Data in PeakFittingDataOverTime:
-            #    Data[7] = Data[7] * 65 ## Eventually set this to use data from the calibration files
-            #    Data[8] = Data[8] * 65
-            #    PeakFittingOverTimeAdjusted.append(Data)
-            #    if Data[11] > 0:
-            #        FitPercent += 1
-                    
-            #FitPercent = np.round(FitPercent / self.FrameCount * 100, 2)
-                
-            #Header = ["Frame","Height","Peak X","Peak Y","Amplitude","Peak X", "Peak Y", "Sigma X (nm)", "Sigma Y (nm)", "Theta (Radians)", "Offset", "R2", "AreaSum5x5", "Photoelectrons per second"]
-            #GL.WriteCsv2D_Data(PeakFittingOverTimeAdjusted,self.ExtractedDataPath,"Peak%s_%sPercentFitted.csv" % (PeakNumber,FitPercent),Header)
-            
-            #PeakNumber += 1
-
-            #self.FittedPeaksOverTime.append(PeakFittingDataOverTime)
 
     def GetFittedPeaks(self):
         return self.FittedPeaksOverTime    
-
-    @staticmethod ## https://stackoverflow.com/questions/17419879/why-i-cannot-use-python-module-concurrent-futures-in-class-method
-    def FitPeaksOverMovieFunctionWrapper(args):
-        ## The function must be called as a method of the class explicetely, since it is a static method
-        PeakFittingDataOverTime = FitPeaksOverMovieFunction(args[0], args[1], args[2], args[3], args[3], args[4], args[5], args[6], args[7])
-
-        return PeakFittingDataOverTime
     
     def RunGetPeaksByGradient(self):
+        ## Wrapper for functions, this enables the use of concurrent futures for asynchronous code execution without recursively calling the entire library thousands of times
         if __name__ != "__main__":
             self.GetPeaksByGradient()
     
@@ -553,664 +499,3 @@ class Movie29_05_2025:
     def RunFitPeaksOverMovie(self):
         if __name__ != "__main__":
             self.FitPeaksOverMovie()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import numpy as np
-import math
-import time
-import scipy.optimize as opt
-import fits
-#import fits
-import tifffile
-import concurrent
-import GeneralLibrary as GL
-
-### Functions to add
-## A general --> Import all data from a folder
-## General --> Create folder if it doesnt already exist function
-## Create subclasses for frames, peaks, and peak groups, allow functions on individual objects
-## Go through and verify all indexing for peaks, positions, and frames
-## Check --> What frame is indexed, what frame is actually checked etc.
-## Fix area of peak - background
-## Create a graphing library
-## Add a queing system for data processing
-## --> Save what step in the process and what file it is on.
-## --> Allows for resuming of data processing in the event of a failure
-## Add a way to check for bistability of peaks (For making good graphs)
-## Append the fraction of peaks fitted in each frame
-## Why am I even fitting the peaks?
-## Create better folder optimization
-## Get bulk statistics (Peaks, average persistance percent (frames also), etc.)
-## Figure out why many frames are not being fitted
-## Set up real time data analysis
-## Implement multithreading where it actually matters
-## Make more generic functions --> Fit gaussian, rather than the iterative ones I currently have
-## Swap to pandas array for indexing of headers
-
-def WriteCsv2D_Data(Data,Path,Filename,Header):
-    #if not filename in os.listdir(path):
-    with open(Path+Filename,'w') as CsvFile:
-        CsvFile.write("")
-            
-    CsvFile.close()
-     
-    with open(Path+Filename,'a') as CsvFile:
-        for Rows in Header:
-            CsvFile.write(str(Rows)+",")
-        
-        CsvFile.write("\n")   
-            
-        for Rows in Data:
-            for Columns in Rows:
-                CsvFile.write(str(Columns)+",")
-            CsvFile.write("\n")        
-    
-    CsvFile.close()
-    
-def Distance(Coordinates1,Coordinates2):
-    distance = math.sqrt((Coordinates2[0]-Coordinates1[0])**2+(Coordinates2[1]-Coordinates1[1])**2)
-    return distance
-
-def getR2(rawdata, fitteddata):
-    residuals = rawdata - fitteddata
-    ss_res = np.sum(residuals**2)
-    ss_tot = np.sum((rawdata-np.mean(rawdata))**2)
-    R2 = 1 - ( ss_res / ss_tot )
-    return R2
-
-def FindPeaks(Frame,MinimumDistance,Threshold,EdgeMaskSize): ## Minimum Distance isnt applied correctly here, remove it in the future.
-    PeakListSeparate = []
-    #PeakList = np.empty((0,3)) ## [Peak Height, Peak X, Peak Y]
-    
-    MorePeaksDetected = True
-    EditedFrame = np.zeros(np.shape(Frame))
-    EditedFrame = EditedFrame + Frame
-    EditedFrame[0:EdgeMaskSize] = 50
-    EditedFrame[EditedFrame.shape[0]-EdgeMaskSize:EditedFrame.shape[0]] = 50
-    EditedFrame[0:EditedFrame.shape[0],0:EdgeMaskSize] = 50
-    EditedFrame[0:EditedFrame.shape[0],EditedFrame.shape[0]-EdgeMaskSize:EditedFrame.shape[0]] = 50
-    
-    while MorePeaksDetected:
-        if np.max(EditedFrame) > Threshold:
-            PeakMax = np.max(EditedFrame)
-            PeakCoordsList = np.where(Frame == PeakMax)
-            PeakCoordsList = list(zip(PeakCoordsList[0],PeakCoordsList[1]))
-        
-        else:
-            MorePeaksDetected = False
-            break
-            
-        for PeakCoords in PeakCoordsList:
-            EditedFrame[PeakCoords[0]-MinimumDistance:PeakCoords[0]+MinimumDistance,PeakCoords[1]-MinimumDistance:PeakCoords[1]+MinimumDistance] = 10
-            PeakData = [PeakMax,PeakCoords[0],PeakCoords[1]]
-            PeakListSeparate.append(PeakData)
-    
-    PeakList = np.array(PeakListSeparate)
-    return EditedFrame, PeakList
-        
-
-def FindPeaksByMaxProjection(Frame, MinimumDistance, Threshold, EdgeMaskSize):
-    MaximumFrame = np.max(Frame, axis = 0)
-    print(np.shape(MaximumFrame))
-    tifffile.imwrite("D:\Microscope Data\ZDRExampleProject\ExtractedData\MovieMax.tif",MaximumFrame)
-    AllPeaks = []
-    xcoords = 0
-    for x in MaximumFrame:
-        ycoords = 0
-        for y in x:
-            if y > Threshold:
-                FrameSlice = Frame[0:np.shape(Frame)[0],xcoords,ycoords]
-                FrameNumber = list(zip(np.where(FrameSlice == y)))[0][0]
-                #print(FrameNumber)
-                #time.sleep(5)
-                AllPeaks.append([0, y, xcoords, ycoords])
-            ycoords = ycoords + 1
-        xcoords = xcoords + 1
-    #print(len(AllPeaks))
-    AllPeaks = np.array(AllPeaks)
-    return AllPeaks
-
-def FindPeaksByMovieSum(Frame,MinimumDistance,Threshold,EdgeMaskSize):
-    PeakListSeparate = []
-    #PeakList = np.empty((0,3)) ## [Peak Height, Peak X, Peak Y]
-    Threshold = Threshold * np.shape(Frame)[0]
-
-    MorePeaksDetected = True
-    EditedFrame = np.zeros(np.shape(Frame))
-    EditedFrame = EditedFrame + Frame
-    EditedFrame[0:EdgeMaskSize] = 50
-    EditedFrame[EditedFrame.shape[0]-EdgeMaskSize:EditedFrame.shape[0]] = 50
-    EditedFrame[0:EditedFrame.shape[0],0:EdgeMaskSize] = 50
-    EditedFrame[0:EditedFrame.shape[0],EditedFrame.shape[0]-EdgeMaskSize:EditedFrame.shape[0]] = 50
-
-    MovieSum = np.sum(Frame, axis = 0)
-    print(np.shape(MovieSum))
-
-    while MorePeaksDetected:
-        if np.max(EditedFrame) > Threshold:
-            PeakMax = np.max(EditedFrame)
-            PeakCoordsList = np.where(Frame == PeakMax)
-            PeakCoordsList = list(zip(PeakCoordsList[0],PeakCoordsList[1]))
-        
-        else:
-            MorePeaksDetected = False
-            break
-            
-        for PeakCoords in PeakCoordsList:
-            EditedFrame[PeakCoords[0]-MinimumDistance:PeakCoords[0]+MinimumDistance,PeakCoords[1]-MinimumDistance:PeakCoords[1]+MinimumDistance] = 10
-            PeakData = [PeakMax,PeakCoords[0],PeakCoords[1]]
-            PeakListSeparate.append(PeakData)
-    
-    PeakList = np.array(PeakListSeparate)
-    return EditedFrame, PeakList
-
-def FilterPeaksByDistance(ArrayOfPeaks,MinimumDistance): ## This would be faster if done in the previous step
-    PrimaryIndex = 0
-    while PrimaryIndex < ArrayOfPeaks.shape[0]:
-        SecondaryIndex = PrimaryIndex ## Algorithm does not recheck already checked peaks
-        Peaks = ArrayOfPeaks[PrimaryIndex]
-        #print("%s / %s" % (PrimaryIndex,ArrayOfPeaks.shape[0]))
-        while SecondaryIndex < ArrayOfPeaks.shape[0]:
-            CheckPeaks = ArrayOfPeaks[SecondaryIndex]
-            if np.all(Peaks == CheckPeaks) == False:
-                distance = Distance((Peaks[2],Peaks[3]),(CheckPeaks[2],CheckPeaks[3]))
-                if distance < MinimumDistance and Peaks[0] == CheckPeaks[0]:
-                    ArrayOfPeaks = np.delete(ArrayOfPeaks,SecondaryIndex,axis=0)
-            SecondaryIndex += 1
-            
-        PrimaryIndex += 1
-            
-    return ArrayOfPeaks
-
-
-def FitPeak(PeakInfo,Frame,FittingProperties,InitialPeakGuesses):
-    ViewingWindow = FittingProperties[0]
-    
-    xaxis = np.linspace(0,ViewingWindow,ViewingWindow)
-    yaxis = np.linspace(0,ViewingWindow,ViewingWindow)
-    xaxis, yaxis = np.meshgrid(xaxis,yaxis)
-    
-    #print(PeakInfo)
-    RelevantFrame = Frame[int(PeakInfo[2]-ViewingWindow/2):int(PeakInfo[2]+ViewingWindow/2),int(PeakInfo[3]-ViewingWindow/2):int(PeakInfo[3]+ViewingWindow/2)]
-    
-    RaveledData = RelevantFrame.ravel()
-    
-    InitialGuess = (PeakInfo[1], *InitialPeakGuesses)
-    RGlower = []
-    RGupper = []
-    
-    for parameters in InitialGuess:
-        RGlower.append(parameters*0.3)
-        RGupper.append(parameters*3)
-    
-    RGlower[0] = InitialGuess[0]*0.35
-    RGlower[3] = 0.25
-    RGlower[4] = 0.25
-    RGlower[5] = 0
-    RGlower[6] = 0
-    
-    RGupper[0] = InitialGuess[0]*3
-    RGupper[3] = 5
-    RGupper[4] = 5
-    RGupper[5] = 0.5
-    RGupper[6] = 1000 
-    
-    ReasonableGuessses = (RGlower,RGupper)
-    
-    BasePeak = RelevantFrame
-    #print(BasePeak.shape)
-    if RaveledData.size < 100:
-        popt = 0
-        R2 = 0
-        FittedData = 0
-        PeakFit = [0,0,0,0,0,0,0]
-        
-    else:
-        try:
-            popt, pcov = opt.curve_fit(fits.twoD_Gaussian, (xaxis,yaxis), RaveledData, p0= InitialGuess, bounds = ReasonableGuessses, maxfev = 10000)
-            FittedData = fits.twoD_Gaussian((xaxis,yaxis),*popt).reshape(ViewingWindow,ViewingWindow)
-            R2 = getR2(RelevantFrame,FittedData)
-            PeakFit = [R2,*popt]
-        
-        except Exception as Error:
-            print(Error)
-            popt = 0
-            R2 = 0
-            FittedData = 0
-            PeakFit = [0,0,0,0,0,0,0]
-            #print("here")
-        
-    FittedPeak = FittedData
-    
-    
-    return FittedPeak, PeakFit, PeakInfo, BasePeak
-
-def FastGaussianFit(Frame,PeakInfo,ViewingWindow):
-    ## Quick Fit Function for Gaussian Peaks:
-    pass
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-class Movie:
-    def __init__(self,Identifier,Path,Filename,PeakPickingSettings,FittingProperties,FitProperties,PeakGroupingSettings,ConversionFactors,**kwargs):
-        self.ForceLoadNonSavedDataTrue = False
-        
-        self.ForceLoadNonSavedDataTrue = kwargs.get("ForceLoad",False)
-        self.ForceLoadNonSavedData = kwargs.get("Movie",0)
-
-        self.ID = Identifier
-        self.Path = Path
-        self.Filename = Filename
-        self.PeakPickingSettings = PeakPickingSettings
-        self.FittingProperties = FittingProperties
-        self.FitProperties = FitProperties
-        self.PeakGroupingSettings = PeakGroupingSettings
-        self.ConversionFactors = ConversionFactors
-        if self.ForceLoadNonSavedDataTrue == False:
-            self.MovieData = tifffile.imread(Filename)
-        else:
-            self.MovieData = self.ForceLoadNonSavedData
-    
-        self.MovieLength = np.shape(self.MovieData)[0]
-        self.AllPeaks = np.empty([0,0])
-        self.FilteredPeaks = np.empty([0,0])
-        self.FittedPeaks = np.empty([0,0])
-        ## Change these for debug options
-        self.DebugFrameRate = 120
-        self.DebugPickPeaks = False
-        self.DebugSortPeaks = False
-        self.DebugFitPeaks = False
-        self.DebugOrganizePeaksThroughTime = False 
-        ## Dont Touch Theses
-        self.FrameNumber = 0
-        GL.CreateIfNotExist(self.Path)
-
-    def GetPeaksByTotalArea(self):
-        EditedFrame, self.FilteredPeaks = FindPeaksByMovieSum(self.MovieData,self.PeakPickingSettings[0],self.PeakPickingSettings[1],self.PeakPickingSettings[2])
-        tifffile.imwrite("%s/PeaksSelected.tif" % (self.Path),EditedFrame)
-
-    def GetPeaks(self):
-        self.AllPeaks = np.empty([0,4]) ## [Frame, Peak Height, Peak X, Peak Y]
-        self.FrameNumber = 0 ## Starts here to align with what ImageJ says.
-        
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            FrameNumber = 0
-            for FramesToPick in self.MovieData:
-                ThreadData = {executor.submit(self.GetPeaksFunct,FramesToPick,FrameNumber): FramesToPick}
-                FrameNumber += 1
-            #ThreadData = {executor.submit(self.GetPeaksFunct,FramesToPick): FramesToPick for FramesToPick in self.MovieData}        
-            for FinishedProcesses in concurrent.futures.as_completed(ThreadData):        
-                Peet = FinishedProcesses.result()
-
-        #WriteCsv2D_Data(self.AllPeaks,"Data/%s/Peaks/" % self.ID,"PeakDataAllFrames.csv" ,["Frame","Height","Peak X","Peak Y"])
-        #print(self.AllPeaks)
-    def SortPeakArrayByHeight(self):
-        self.AllPeaks = self.AllPeaks[self.AllPeaks[:,2].argsort()[::-1]] ## Sort the numpy array in reverse order by hieght --> Tallest peaks prioritized, regardless of frame number
-
-    def GetPeaksByMaxFunction(self):
-        self.AllPeaks = FindPeaksByMaxProjection(self.MovieData,self.PeakPickingSettings[0],self.PeakPickingSettings[1],self.PeakPickingSettings[2] )
-
-    def GetPeaksFunct(self,Frames,FrameNumber):
-        
-        
-        EditedFrame, PeakData = FindPeaks(Frames,self.PeakPickingSettings[0],self.PeakPickingSettings[1],self.PeakPickingSettings[2])
-        
-        if self.DebugPickPeaks == True:
-            if PeakData.size != 0: 
-                WriteCsv2D_Data(PeakData,"%s/" % (self.Path),"PeakDataFrame%s.csv" % (FrameNumber + 1),["Height","Peak X","Peak Y"])
-            tifffile.imwrite("%s/PeaksSelected%s.tif" % (self.Path,FrameNumber + 1),EditedFrame)
-            print("Picking Peaks at Frame:%s " % (FrameNumber + 1))
-            time.sleep(1/self.DebugFrameRate)
-            
-        if PeakData.shape != (0,):
-            FramePeakData = np.zeros((PeakData.shape[0],1)) + FrameNumber + 1    
-            DataToAllPeaks = np.hstack((FramePeakData,PeakData))
-                
-            self.AllPeaks = np.vstack((self.AllPeaks,DataToAllPeaks))
-            
-        
-        return "peet"
-    
-    def FilterPeaks(self):
-        self.FilteredPeaks = FilterPeaksByDistance(self.AllPeaks,self.PeakPickingSettings[2])
-
-        if self.DebugSortPeaks == True:
-            WriteCsv2D_Data(self.FilteredPeaks,"%s%s/" % (self.Path,self.ID),"FilteredPeakData.csv",["Frame","Height","Peak X","Peak Y"])
-    
-        #print(self.FilteredPeaks)
-
-    def TruncatePeakList(self):
-        #print(np.shape(self.FittedPeakArray))
-        self.FittedPeakArray = self.FittedPeakArray[0:5]
-        #print(np.shape(self.FittedPeakArray))
-
-    def FitPeaks(self):
-        PeakNumber = 0
-        
-        AllFittedPeaks = np.empty([0,12])
-        for Peaks in self.FilteredPeaks:
-            FrameNumber = Peaks[0] - 1
-            FrameForFitting = self.MovieData[int(FrameNumber)]
-            FittedPeak, PeakFit, Peaks, BasePeak = FitPeak(Peaks,FrameForFitting,self.FittingProperties,self.FitProperties)
-            if np.all(PeakFit == [0,0,0,0,0,0,0]):
-                PeakFitNegatives = np.zeros([8]) - 1000
-                PeakFitNegatives = np.hstack((PeakFitNegatives,Peaks))                
-                AllFittedPeaks = np.vstack((AllFittedPeaks,PeakFitNegatives))
-                
-            else:
-                PeakFit = np.hstack((PeakFit,Peaks)) 
-                AllFittedPeaks = np.vstack((AllFittedPeaks,PeakFit))
-            
-            if self.DebugFitPeaks == True:
-                tifffile.imwrite("%sPeakFittedFrame%sPeak%s.tif" % (self.Path,int(Peaks[0]),PeakNumber),FittedPeak)
-                tifffile.imwrite("%sPeakRawDataFrame%sPeak%s.tif" % (self.Path,int(Peaks[0]),PeakNumber),BasePeak)
-                PeakNumber += 1            
-        
-        self.FittedPeaks = AllFittedPeaks
-        #WriteCsv2D_Data(self.FittedPeaks,"Data/%s/Peaks/" % self.ID,"FittedPeaks.csv",["R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-    
-    def GetFittedPeaks(self):
-        return self.FittedPeaks
-
-    def SortData(self):
-        pass
-    
-    def FilterPeakFits(self):
-        self.GoodFits = np.empty([0,12])
-        self.BadFits = np.empty([0,12])
-        for Peaks in self.FittedPeaks:
-            if Peaks[0] < self.FittingProperties[1]:
-                self.BadFits = np.vstack((self.BadFits,Peaks))
-            else:
-                self.GoodFits = np.vstack((self.GoodFits,Peaks))
-
-
-        #WriteCsv2D_Data(self.GoodFits,"Data/%s/Peaks/" % self.ID,"GoodFits.csv",["R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-        #WriteCsv2D_Data(self.BadFits,"Data/%s/Peaks/" % self.ID,"BadFits.csv",["R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-    
-    def RefitBadFits(self): ## Apply processes to refit badly fit peaks. Figure out why then reprocess them here.
-        IntialGuessSmallPeaks = (10,10,0.8,0.8,0.001,100)
-        RefittedBadPeaks = np.empty([0,12])
-        AllRefittedPeaks = np.empty([0,12])
-        
-        for BadFits in self.BadFits:
-            FittedPeak, PeakFit, PeakInfo, BasePeak = FitPeak(BadFits[8:12],self.MovieData[int(BadFits[8]-1)],self.FittingProperties,IntialGuessSmallPeaks)
-        
-            if np.all(PeakFit == [0,0,0,0,0,0,0]):
-                PeakFitNegatives = np.zeros([8]) - 1000
-                PeakFitNegatives = np.hstack((PeakFitNegatives,PeakInfo))                
-                AllRefittedPeaks = np.vstack((AllRefittedPeaks,PeakFitNegatives))
-                
-            else:
-                PeakFit = np.hstack((PeakFit,PeakInfo)) 
-                AllRefittedPeaks = np.vstack((AllRefittedPeaks,PeakFit))
-            
-            if self.DebugFitPeaks == True:
-                tifffile.imwrite("%sPeakFittedFrame%sPeak%s.tif" % (self.Path,int(PeakInfo[0]),PeakNumber),FittedPeak)
-                tifffile.imwrite("%sPeakRawDataFrame%sPeak%s.tif" % (self.Path,int(PeakInfo[0]),PeakNumber),BasePeak)
-                PeakNumber += 1            
-        
-        self.RefittedBadPeaks = AllRefittedPeaks
-        #WriteCsv2D_Data(self.RefittedBadPeaks,"Data/%s/Peaks/" % self.ID,"RefittedBadPeaks.csv",["R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-    
-    def OrganizePeaksThroughTime(self):
-        PeakNumber = 1
-        self.FittedPeakArray = []
-        for Peaks in self.GoodFits:
-            GroupedFits = np.empty([0,12])
-            IndexGroupingA = 0
-            for OtherPeaks in self.GoodFits:
-                if np.all(OtherPeaks == Peaks) == False and Peaks[8] != OtherPeaks[8]:
-                    if Distance((Peaks[10],Peaks[11]),(OtherPeaks[10],OtherPeaks[11])) < self.PeakGroupingSettings[0]:
-                        GroupedFits = np.vstack((GroupedFits,OtherPeaks))
-                        self.GoodFits = np.delete(self.GoodFits,IndexGroupingA,axis=0)
-                        IndexGroupingA -= 1
-                
-                IndexGroupingA += 1
-            PeakNumberArray = np.empty([np.shape(GroupedFits)[0],1]) + PeakNumber
-            GroupedFits = np.hstack((PeakNumberArray,GroupedFits))
-            PeakNumber += 1
-            if GroupedFits.shape != (0,13):
-                self.FittedPeakArray.append(GroupedFits)
-        
-        if self.DebugOrganizePeaksThroughTime == True:
-            IndexGroupingB = 1
-            for GroupedPeaks in self.FittedPeakArray:
-                WriteCsv2D_Data(GroupedPeaks,"%s" % (self.Path),"GroupedPeak%s.csv" % IndexGroupingB,["Peak Number","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-                IndexGroupingB += 1
-    
-    def FinalizePeaks(self):
-        TotalFrames = np.shape(self.MovieData)[0] - 1
-        self.FinalPeakInfo = []
-        BackgroundNoise = np.average(self.MovieData[0:10]) ## This a bad way of doing this for data that starts with laser active
-        for PeakGroupings in self.FittedPeakArray: ## Grouped Peaks
-            CompletePeakInfo = np.empty([0,13])
-            ExtraInfoArray = np.empty([0,6])
-            #0: "Peak Number"
-            #1: "R2"
-            #2: "Fit Height"
-            #3: "Fit Peak X"
-            #4: "Fit Peak Y"
-            #5: "Sigma X"
-            #6: "Sigma Y"
-            #7: "Fit Theta"
-            #8: "Fit Offset"
-            #9: "Frame"
-            #10: "Height"
-            #11: "Peak X"
-            #12: "Peak Y"
-            #13: "Photoelectrons Total"
-            #14: "Photoelectrons per Second"
-            #15: "Area of Peak"
-            #16: "Photoelectrons - Background"
-            #17: "Photoelectrons per Second - Background"
-            #18: "Area of Peak - Background"
-            PercentFitted = 0
-            FrameNumber = 0
-            for Peaks in PeakGroupings: ## Each Peak Item
-                while Peaks[9] != FrameNumber and FrameNumber != self.MovieLength: ## If there is no data for a particular frame
-                    PeakHeight = self.MovieData[FrameNumber,int(Peaks[11]),int(Peaks[12])]
-                    BlankInfo = np.array([Peaks[0],0,0,0,0,0,0,0,0,FrameNumber,PeakHeight,0,0])
-                    CompletePeakInfo = np.vstack((CompletePeakInfo,BlankInfo))
-                    PE = PeakHeight # Photoelectrons
-                    PES = PE / self.ConversionFactors[1] # Photoelectrons / Second
-                    PeakArea = np.sum(self.MovieData[FrameNumber,int(Peaks[11]-self.PeakGroupingSettings[1]):int(Peaks[11]+self.PeakGroupingSettings[1]),int(Peaks[12]-self.PeakGroupingSettings[1]):int(Peaks[12]+self.PeakGroupingSettings[1])]) # Peak Area
-                    
-                    PEBC = PE - BackgroundNoise ## Background corrected Photoelectonrs
-                    PESBC = PEBC / self.ConversionFactors[1] ## Background corrected PE/S
-                    PeakAreaBC = PeakArea - (self.PeakGroupingSettings[1]*2)**2*BackgroundNoise ## Background corrected Peak Area
-                    
-                    ExtraInfoArray = np.vstack((ExtraInfoArray,np.array([PE,PES,PeakArea,PEBC,PESBC,PeakAreaBC])))
-                    FrameNumber += 1
-                
-                if Peaks[9] == FrameNumber: ## Appends the info if their is data at a certain frame
-                    CompletePeakInfo = np.vstack((CompletePeakInfo,Peaks))
-                    
-                    PE = Peaks[2] # Photoelectrons
-                    PES = PE * self.ConversionFactors[1] # Photoelectrons / Second
-                    PeakArea = np.sum(self.MovieData[FrameNumber,int(Peaks[11]-self.PeakGroupingSettings[1]):int(Peaks[11]+self.PeakGroupingSettings[1]),int(Peaks[12]-self.PeakGroupingSettings[1]):int(Peaks[12]+self.PeakGroupingSettings[1])]) # Peak Area
-                    
-                    PEBC = PE - BackgroundNoise ## Background corrected Photoelectonrs
-                    PESBC = PEBC * self.ConversionFactors[1] ## Background corrected PE/S
-                    PeakAreaBC = PeakArea - (self.PeakGroupingSettings[1]*2)**2*BackgroundNoise ## Background corrected Peak Area
-                    ExtraInfoArray = np.vstack((ExtraInfoArray,np.array([PE,PES,PeakArea,PEBC,PESBC,PeakAreaBC])))
-                    FrameNumber += 1
-                    
-            while FrameNumber < self.MovieLength:
-                PeakHeight = self.MovieData[FrameNumber,int(Peaks[11]),int(Peaks[12])]
-                BlankInfo = np.array([Peaks[0],0,0,0,0,0,0,0,0,FrameNumber,PeakHeight,0,0])
-                CompletePeakInfo = np.vstack((CompletePeakInfo,BlankInfo))
-                PE = PeakHeight # Photoelectrons
-                PES = PE * self.ConversionFactors[1] # Photoelectrons / Second
-                PeakArea = np.sum(self.MovieData[FrameNumber,int(Peaks[11]-self.PeakGroupingSettings[1]):int(Peaks[11]+self.PeakGroupingSettings[1]),int(Peaks[12]-self.PeakGroupingSettings[1]):int(Peaks[12]+self.PeakGroupingSettings[1])]) # Peak Area
-                    
-                PEBC = PE - BackgroundNoise ## Background corrected Photoelectonrs
-                PESBC = PEBC * self.ConversionFactors[1] ## Background corrected PE/S
-                PeakAreaBC = PeakArea - (self.PeakGroupingSettings[1]*2)**2*BackgroundNoise ## Background corrected Peak Area
-                        
-                ExtraInfoArray = np.vstack((ExtraInfoArray,np.array([PE,PES,PeakArea,PEBC,PESBC,PeakAreaBC])))
-                FrameNumber += 1
-                
-            AllPeakData = np.hstack((CompletePeakInfo,ExtraInfoArray))
-            self.FinalPeakInfo.append(AllPeakData)
-        
-
-
-        IndexFinalizeA = 1
-        BulkPhotonsPerSecond = []
-        BulkTotalCollectedPhotons = []
-        TotalIndex = 1
-        for FinalizedData in self.FinalPeakInfo:
-            PercentFitted = 0
-            TotalPhotonsCollected = 0
-            for items in FinalizedData:
-                if items[1] != 0:
-                    PercentFitted += 1
-                
-                TotalPhotonsCollected += items[16]
-                
-            TotalIndex += 1
-            DataToAppend = [TotalIndex,TotalPhotonsCollected]
-            BulkTotalCollectedPhotons.append(DataToAppend)
-
-            PercentFitted = PercentFitted / self.MovieLength * 100
-            PercentFitted = np.round(PercentFitted,3)
-            WriteCsv2D_Data(FinalizedData,"%s/" %self.Path,"GroupedPeakFinal%sFitted%sPercent.csv" % (IndexFinalizeA,PercentFitted),["Peak Number","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y", "Photoelectrons Total", "Photoelectrons per Second", "Area of Peak", "Photoelectrons - Background", "Photoelectrons per Second - Background", "Area of Peak - Background"])
-            IndexFinalizeA += 1
-            
-            WriteCsv2D_Data(BulkTotalCollectedPhotons,"%s/" %self.Path,"TotalCollectedPhotons.csv",["Index","Total Photons Collected - Background"])
-
-
-    def OrganizePeaksThroughTimeNew(self):
-        PeakNumber = 1
-        self.FilteredPeaksForFittingArray = []
-        for Peaks in self.FilteredPeaks:
-            GroupedFits = np.empty([0,4]) # ["Frame","Height","Peak X","Peak Y"]
-            IndexGroupingA = 0
-            for OtherPeaks in self.FilteredPeaks:
-                if np.all(OtherPeaks == Peaks) == False and Peaks[0] != OtherPeaks[0]:
-                    if Distance((Peaks[2],Peaks[3]),(OtherPeaks[2],OtherPeaks[3])) < self.PeakGroupingSettings[0]:
-                        GroupedFits = np.vstack((GroupedFits,OtherPeaks))
-                        self.FilteredPeaks = np.delete(self.FilteredPeaks,IndexGroupingA,axis=0)
-                        IndexGroupingA -= 1
-                
-                IndexGroupingA += 1
-            PeakNumberArray = np.empty([np.shape(GroupedFits)[0],1]) + PeakNumber
-            GroupedFits = np.hstack((PeakNumberArray,GroupedFits))
-            PeakNumber += 1
-            if GroupedFits.shape != (0,13):
-                self.FilteredPeaksForFittingArray.append(GroupedFits)
-        
-        if self.DebugOrganizePeaksThroughTime == True:
-            IndexGroupingB = 1
-            for GroupedPeaks in self.FilteredPeaks:
-                WriteCsv2D_Data(GroupedPeaks,self.Path,"GroupedPeak%s.csv" % IndexGroupingB,["Peak Number","R2","Fit Height","Fit Peak X","Fit Peak Y","Sigma X","Sigma Y","Fit Theta","Fit Offset","Frame","Height","Peak X","Peak Y"])
-                IndexGroupingB += 1
-
-        self.FilteredPeaksForFittingArray = self.FilteredPeaks
-        self.FittedPeakArray = self.FilteredPeaksForFittingArray
-
-        print(self.FittedPeakArray)
-
-    def FitPeaksOverMovie(self):
-        PeakNumber = 0
-
-        AllFittedPeaks = np.empty([0,12])
-        #print(self.FittedPeakArray)
-        #time.sleep(5)
-
-        for Peaks in self.FittedPeakArray:
-            FrameNumber = 0
-            for Frames in self.MovieData:
-                
-                FittedPeak, PeakFit, Peaks, BasePeak = FitPeak(Peaks,Frames,self.FittingProperties,self.FitProperties)
-                
-                if np.all(PeakFit == [0,0,0,0,0,0,0]):
-                    PeakFitNegatives = np.zeros([8]) - 1000
-                    PeakFitNegatives = np.hstack((PeakFitNegatives,Peaks))
-                    AllFittedPeaks = np.vstack((AllFittedPeaks,PeakFitNegatives))
-
-                else:
-                    Peaks[0] = FrameNumber
-                    PeakFit = np.hstack((PeakFit,Peaks)) 
-                    #print(PeakFit)
-                    #time.sleep(5)
-                    AllFittedPeaks = np.vstack((AllFittedPeaks,PeakFit))
-                
-                if self.DebugFitPeaks == True:
-                    tifffile.imwrite("%sPeakFittedFrame%sPeak%s.tif" % (self.Path,int(Peaks[0]),PeakNumber),FittedPeak)
-                    tifffile.imwrite("%sPeakRawDataFrame%sPeak%s.tif" % (self.Path,int(Peaks[0]),PeakNumber),BasePeak)
-                     
-                
-                FrameNumber += 1
-            #print(PeakNumber)
-            PeakNumber += 1   
-        self.FittedPeaks = AllFittedPeaks
-
-    def GetFinalizedPeakArray(self):
-        return self.FinalPeakInfo
-    
-    def ReturnMovieData(self):
-        return self.MovieData
-    
-    def ReturnPeaks(self):
-        return self.AllPeaks
-    
-    def ReturnID(self):
-        print(self.ID)
-        return self.ID
-    
-    def GetPeakArrayShapes(self):
-        return self.AllPeaks.shape, self.FilteredPeaks.shape, self.FittedPeaks.shape, self.GoodFits.shape, self.BadFits.shape, self.RefittedBadPeaks.shape

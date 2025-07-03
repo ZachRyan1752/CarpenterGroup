@@ -1,6 +1,4 @@
 ## This library contains general functions that are useful for all libraries, but do not necessarily belong in any particular library
-
-
 # Import Library
 import datetime
 import os
@@ -15,6 +13,7 @@ from bs4 import BeautifulSoup
 import csv
 from tkinter import filedialog
 import tkinter
+import tifffile
 
 # Defs
 ## Searching for data on the computer
@@ -71,31 +70,25 @@ def CreateIfNotExist(Path):
     else:
         os.mkdir(Path)
 
-## Other
-
-
-
-def GetFormattedYMDHSAP():
-    ## Returns the date and time in string format of Year_Month_Day_Hour_Minute_AM/PM
-    DateAndTime = datetime.datetime.now()
-    DateAndTimeFormatted = datetime.datetime.strftime(DateAndTime,"20%y_%m_%d_%I_%M_%p")
-    return DateAndTimeFormatted
-
-
-
-
-
-
-def Distance(Coordinates1,Coordinates2):
-    distance = math.sqrt((Coordinates2[0]-Coordinates1[0])**2+(Coordinates2[1]-Coordinates1[1])**2)
-    return distance
-
-def getR2(rawdata, fitteddata):
-    residuals = rawdata - fitteddata
-    ss_res = np.sum(residuals**2)
-    ss_tot = np.sum((rawdata-np.mean(rawdata))**2)
-    R2 = 1 - ( ss_res / ss_tot )
-    return R2
+def WriteCsv2D_Data(Data,Path,Filename,Header):
+    #if not filename in os.listdir(path):
+    with open(Path+Filename,'w') as CsvFile:
+        CsvFile.write("")
+            
+    CsvFile.close()
+     
+    with open(Path+Filename,'a') as CsvFile:
+        for Rows in Header:
+            CsvFile.write(str(Rows)+",")
+        
+        CsvFile.write("\n")   
+            
+        for Rows in Data:
+            for Columns in Rows:
+                CsvFile.write(str(Columns)+",")
+            CsvFile.write("\n")        
+    
+    CsvFile.close()
 
 def MakeXMLWithHeader(Header, SubHeaders, SubHeadersDataNames, Data, FilePath, FileName):
     ## Creates a XML of arbitrary data
@@ -130,14 +123,30 @@ def MakeXMLWithHeaderbs4(Header, SubHeaders, Data, FilePath, FileName):
         XMLTag = XMLData.new_tag(SubHeader)
         XMLTag.string = str(Data[XMLIterator])
         Root.append(XMLTag)
-        
-        
 
         XMLIterator += 1
 
     with open(FilePath+FileName, "w", encoding = "utf-8") as File:
         File.write(XMLData.prettify())
 
+## Various mathematical processes
+def Distance(Coordinates1,Coordinates2):
+    distance = math.sqrt((Coordinates2[0]-Coordinates1[0])**2+(Coordinates2[1]-Coordinates1[1])**2)
+    return distance
+
+def getR2(rawdata, fitteddata):
+    residuals = rawdata - fitteddata
+    ss_res = np.sum(residuals**2)
+    ss_tot = np.sum((rawdata-np.mean(rawdata))**2)
+    R2 = 1 - ( ss_res / ss_tot )
+    return R2
+
+## Other
+def GetFormattedYMDHSAP():
+    ## Returns the date and time in string format of Year_Month_Day_Hour_Minute_AM/PM
+    DateAndTime = datetime.datetime.now()
+    DateAndTimeFormatted = datetime.datetime.strftime(DateAndTime,"20%y_%m_%d_%I_%M_%p")
+    return DateAndTimeFormatted
 
 def twoD_FFT(Image):
     FFT = cv2.dft(np.float32(Image), flags = cv2.DFT_COMPLEX_OUTPUT)
@@ -147,26 +156,6 @@ def twoD_FFT(Image):
 
     FFTNormalized = cv2.normalize(FFTMagnitude, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
     return FFTNormalized
-
-def WriteCsv2D_Data(Data,Path,Filename,Header):
-    #if not filename in os.listdir(path):
-    with open(Path+Filename,'w') as CsvFile:
-        CsvFile.write("")
-            
-    CsvFile.close()
-     
-    with open(Path+Filename,'a') as CsvFile:
-        for Rows in Header:
-            CsvFile.write(str(Rows)+",")
-        
-        CsvFile.write("\n")   
-            
-        for Rows in Data:
-            for Columns in Rows:
-                CsvFile.write(str(Columns)+",")
-            CsvFile.write("\n")        
-    
-    CsvFile.close()
 
 def ImportAllCsvFromDirectory(DataFolder):
     ## Import all data from a directory contained in .csv files and return them as a singular array
@@ -184,6 +173,7 @@ def ImportAllCsvFromDirectory(DataFolder):
     return DataArrayOutput
 
 def FormatXMLString(String):
+    ## Remove extraneous characters from an imported string from a .xml file
     String = String.replace("\n  ","")
     String = String.replace("\n ","")
 

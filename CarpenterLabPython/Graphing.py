@@ -1,7 +1,87 @@
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+import GeneralLibrary as GL
+
+## Dont modify this
+### Set the base configuration of the format
+def Init():
+    mpl.rcParams['font.family'] = 'Arial'
+    plt.rc('axes', titlesize = 8, labelsize = 8)
+    plt.rc('figure', titlesize = 8)
+    plt.rc('legend', fontsize = 8)
+    plt.rc('xtick', labelsize = 8)
+    plt.rc('ytick', labelsize = 8)
+    
+
+def ACSFormatSingleColumn():
+    ## Based on ACS standard figure format for a single column figure
+    ## https://pubs.acs.org/page/4authors/submission/graphics_prep.html
+    ## https://pubsapp.acs.org/paragonplus/submission/ascefj/ascefj_figure_calc.pdf
+    plt.rcParams['figure.figsize'] = (3.25,2.5)
+    #mpl.rcParams['figure.dpi'] = 600
+
+
+def ACSFormatDoubleColumn():
+    ## Based on ACS standard figure format for a double column figure
+    ## https://pubs.acs.org/page/4authors/submission/graphics_prep.html
+    ## https://pubsapp.acs.org/paragonplus/submission/ascefj/ascefj_figure_calc.pdf
+    plt.rcParams['figure.figsize'] = (7,2.5)
+    #mpl.rcParams['figure.dpi'] = 600
+
+
+def Histogram(DataArray, LabelArray, Bins, Type, **kwargs):
+    ## https://matplotlib.org/stable/api/_as_gen/matplotlib.pyplot.hist.html
+    ## Generally applicable to all graphs
+    AxisLabels = kwargs.get("AxisLabels",["",""])
+    AxisScales = kwargs.get("AxisScales",["linear","linear"])
+    AxisLimits = kwargs.get("AxisLimits",[])
+    AxisTicks = kwargs.get("Ticks",[])
+    
+
+    ## Generating the plot and applying the configurations
+    Fig, Axs = plt.subplots()
+    Axs.set(xlabel = AxisLabels[0], ylabel = AxisLabels[1])
+    Axs.set(xscale = AxisScales[0], yscale = AxisScales[1])
+    if AxisTicks != []:
+        plt.xticks = AxisTicks[0]
+        plt.yticks = AxisTicks[1]
+    if AxisLimits != []:
+        Axs.set(xlim = AxisLimits[0], ylim = AxisLimits[1])
+    
+    ## Histogram specific
+    DataIndex = 0
+    for Data in DataArray:
+        Axs.hist(Data, bins = Bins, histtype = Type, label = LabelArray[DataIndex])
+        DataIndex += 1
+    
+    ## General code applied to all figures
+    Fig.tight_layout()
+
+    FigOutput = plt.gcf()
+    plt.show()
+
+    SaveType = kwargs.get("Save","Prompt")
+    if SaveType == "Prompt":
+        plt.draw()
+        Location = GL.AskForDirectory()
+        Name = input("Figure Name?") + ".tif"
+        FigOutput.savefig(Location + Name, dpi = 600)
+
+
+
+
+
+
+
+
+
+
+
+
+
 import numpy as np
 import time
-import matplotlib as mpl
+
 
 
 ## Do NOT Modify these EVER

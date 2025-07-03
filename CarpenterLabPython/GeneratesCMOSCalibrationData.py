@@ -8,7 +8,6 @@ import numpy as np
 from scipy.stats import linregress
 import scipy.optimize as opt
 import concurrent
-import gc
 import math
 from scipy.fft import fft2, fftshift
 import cv2
@@ -18,7 +17,6 @@ import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 import time
 import matplotlib.pyplot as plt
-import multiprocessing as MP
 import tkinter
 from tkinter import filedialog
 
@@ -173,9 +171,6 @@ def StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndAB
                 ProcessData = [Frames,FrameAAverage, FrameCounter, MovieShape] ## Create a list containing the data to process
                 DataPool.append(ProcessData) ## Append that list to the bulk data pool to be processed
 
-                #ThreadData = executor.map(FrameABSubtraction, Frames, FrameAAverage, FrameCounter, MovieShape) # .submit
-                #ThreadData = {executor.submit(FrameABSubtraction, Frame2, FrameAAverage, FrameCounter, MovieShape) for Frame2 in StitchedMovie}
-                #break
             FrameCounter += 1 ## Increment to the next frame
 
         ## https://stackoverflow.com/questions/6785226/pass-multiple-parameters-to-concurrent-futures-executor-map
@@ -199,7 +194,7 @@ def StitchMoviesAndReturnAverageAndVarianceArraysAfterBackgroundSubtractionAndAB
 
 
 def GainCalibrationFromMovies(IlluminationLevels, **kwargs):
-    DataType = kwargs.get("Data","Find") ## Extracting parameters from the function inputs
+    DataType = kwargs.get("Data","Search") ## Extracting parameters from the function inputs
     DataPath = kwargs.get("DataPath","None") ## Folder path if provided
 
     if DataType == "Find": ## If you want to find the data in a directory by passing it a string
@@ -302,11 +297,6 @@ def GainCalibrationFromMovies(IlluminationLevels, **kwargs):
     AverageFrameOverIlluminationLevels = AverageFrameOverIlluminationLevels2 ## Resetting the variables to their original designation
     VarianceFrameOverIlluminationLevels = VarianceFrameOverIlluminationLevels2
     
-    
-    #AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
-    #AverageFrameOverIlluminationLevels = np.array(AverageFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
-    #VarianceFrameOverIlluminationLevels = np.array(VarianceFrameOverIlluminationLevels) ## Convert list to np arrays for easier slicing
-
     print("Average and Variance Array Shapes") 
     print(np.shape(AverageFrameOverIlluminationLevels),np.shape(VarianceFrameOverIlluminationLevels)) ## Print the shapes of the average and variance frame stacks, they should be equal to (# of illumination levels, # pixels X, # pixels Y)
     Iterator1 = 0 
@@ -409,7 +399,7 @@ def GainCalibrationFromMovies(IlluminationLevels, **kwargs):
 
 def SpatialCalibrationFromRuling(LPM, CameraPixelSizeum, **kwargs):
     ## Get the spatial calibration information of a imaging system via a Ronchi ruling
-    DataType = kwargs.get("Data","Find") ## Extracting parameters from the function inputs
+    DataType = kwargs.get("Data","Search") ## Extracting parameters from the function inputs
     DataPath = kwargs.get("DataPath","None") ## Folder path if provided
 
     if DataType == "Find": ## If you want to find the data in a directory by passing it a string
@@ -421,7 +411,6 @@ def SpatialCalibrationFromRuling(LPM, CameraPixelSizeum, **kwargs):
 
     if DataType == "Search": ## If you want to open file explorer and select a folder like that
         ## https://stackoverflow.com/questions/66663179/how-to-use-windows-file-explorer-to-select-and-return-a-directory-using-python
-        tkinter.Tk().withdraw() ## No empty tkinter windows
         
         print("What is the data directory?") 
         DataPath = filedialog.askdirectory() + "/" ## Opens file explorer, user selects a directory
@@ -476,7 +465,7 @@ def SpatialCalibrationFromRuling(LPM, CameraPixelSizeum, **kwargs):
 
 def GetBeamProfile(BeamIntensityAtSample, **kwargs):
 
-    DataType = kwargs.get("Data","Find") ## Extracting parameters from the function inputs
+    DataType = kwargs.get("Data","Search") ## Extracting parameters from the function inputs
     DataPath = kwargs.get("DataPath","None") ## Folder path if provided
 
     if DataType == "Find": ## If you want to find the data in a directory by passing it a string
@@ -514,13 +503,8 @@ def GetBeamProfile(BeamIntensityAtSample, **kwargs):
     ## Finding where the image rises above the background on one size to crop the image for faster fitting
     ## Where the image rised above background - 50 pixels
     OriginalMovieShape = np.shape(MovieAveraged)
-    FitBoundsXMin = 0 #np.where(MovieAveraged[PeakCoords[0][0][0]] > 150)[0][0] - 250 
-    #FitBoundsXMax = OriginalMovieShape[0] - FitBoundsXMin ## Assumes the peak is perfectly in the center
-    FitBoundsYMin = 0 #np.where(MovieAveraged[PeakCoords[1][0][0]] > 150)[0][0] - 250
-    #FitBoundsYMax = OriginalMovieShape[1] - FitBoundsXMin ## Assumes the peak is perfectly in the center
-    #MovieAveraged = MovieAveraged[FitBoundsXMin:FitBoundsXMax,FitBoundsYMin:FitBoundsYMax]
-    #print(FitBoundsXMin,FitBoundsXMax,FitBoundsYMin,FitBoundsYMax)
-
+    FitBoundsXMin = 0
+    FitBoundsYMin = 0
 
     ImageShape = np.shape(MovieAveraged) ## Getting the shape of the averaged frame
     xaxis = np.linspace(0,ImageShape[0],ImageShape[0]) ## Setting up axes for a 2D Gaussian fit
@@ -703,11 +687,6 @@ def ApplyCalibrationsToMovies(**kwargs):
 
     Header = "MovieTracing"
     GL.MakeXMLWithHeaderbs4(Header, SubHeaders, DataArray,  ExtractedDataPath, "MovieTracing.xml")
-    ## Applying gain calibration to the blank file
-    #BlankFrame = tifffile.imread(FolderPath + "Calibration/CalibrationData/BlankAverage.tif")
-    #BlankFrame = BlankFrame * 0.24 ## Not the cropped gain calibration image because the code is not yet implemented yet
-
-    #tifffile.imwrite(FolderPath + "Calibration/CalibrationData/BlankAverageGainCorrected.tif",BlankFrame.astype(np.float32))
 
 def RunGainCalibrationFromMovies(IlluminationLevels, **kwargs): ## Wrapper to enable the use of concurrent.futures based parallelization
     if __name__ != "__main__":

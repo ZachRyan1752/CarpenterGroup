@@ -8,5 +8,5 @@ version = "1.0.0"
 
 [project.scripts]
 
-[tools.setuptools.packages.find]
-where = ["."]
+[tool.setuptools]
+py-modules = ['GeneratesCMOSCalibrationData','ImageProcessing','MicroscopeController','Graphing','GeneralLibrary','fits']
