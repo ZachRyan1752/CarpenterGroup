@@ -4,6 +4,7 @@ import GeneralLibrary as GL
 import numpy as np
 import time
 import random
+import tifffile
 ## Hints
 ## 1) If you arent capturing as long of movies as you want check that the size of you movie isnt at or near 16 Gb in size
 ## ^ Larger or similarly sized movies will overwhelm the circular buffer <-- This will be fixed, eventually
@@ -27,7 +28,7 @@ def Collection(Iterator,Vars,System,FocusArray):
         Position = System.GetStagePosition()
 
         print("X:{} um, Y:{} um, Z:{}".format(Position[0],Position[1],Position[2]))
-        Status, Focus = System.MoveInPattern("move", Vars, 0, Autofocus = True)
+        Status, Focus = System.MoveInPattern("move", Vars, 0, Autofocus = True, Method = "HighestVariance")
 
 
         
@@ -39,7 +40,7 @@ def Collection(Iterator,Vars,System,FocusArray):
 
         print("Capturing Photo")
         
-        System.CaptureImage("Save")
+        System.CaptureImage("Save", Settings = "Internal")
         #System.CaptureMovie("Save",30,1/30,5,Iterator) ## 10 seconds --> 30 fps --> 300 frames, setting this higher than 30 fps changes cameramode automatically
         
         print("Movie Collected, Moving to Position: %s out of %s" % (Iterator,NumberOfPositions))
@@ -65,11 +66,14 @@ if __name__ == "__main__":
     #Vars1 = [[5,185,10],[5,165,9],[75,100,1]] ## [X,Y,Z]
     StartX = 10
     StopX = 130 
-    StepX = 20
+    StepX = 60
     StartY = 10
     StopY = 130
-    StepY = 20
+    StepY = 60
 
+
+
+    System1.SetInternalCollectionSettings(ExposureTime = 250, FrameSize = [1152, 1152], CropType = "Centered")
 
     Vars1 = [[StartX,StopX,StepY],[StartY,StopY,StepY],[0,0,0]] ## [X,Y,Z] 
     Iterator1 = 1
@@ -81,32 +85,27 @@ if __name__ == "__main__":
 
     FocusArray1 = Collection(Iterator1,Vars1,System1,FocusArray1)
 
-    FocusArray = np.array(FocusArray1).reshape((int((StopX-StartX)/StepX),int((StopY-StartY)/StepY)))
+    FocusArrayXIterator = 0
+    FocusArrayStitched = []
+    StepsX = int((StopX-StartX)/StepX)
+    StepsY = int((StopY-StartY)/StepY)
+    while FocusArrayXIterator < StepsX:
+        FocusArrayYIterator = 0
+        FocusColumn = []
 
-    print(FocusArray)
+        while FocusArrayYIterator < StepsY:
+            
+            FocusColumn.append(FocusArray1[FocusArrayXIterator*StepsY+FocusArrayYIterator])
+            FocusArrayYIterator += 1
+
+        FocusArrayStitched.append(FocusColumn)
+        FocusArrayXIterator += 1
+
+    FocusArrayStitched = np.array(FocusArrayStitched).astype(np.float32)
+    print(np.shape(FocusArrayStitched))
+    tifffile.imwrite("ExtractedData/FocusArray.tif",FocusArrayStitched)
+
+    #print(FocusArray)
     print("Program Done!")
 
     exit
-#GL.WriteCsv2D_Data(FocusArray,)
-#FocusArrayXValuesHeader.insert(0,np.float64(0))
-#XLabels = FocusArrayXValuesHeader # Adding a corner/vertex datapoint
-#YLabels = np.array(FocusArrayYValuesHeader).T
-
-
-#XLabelsText = []
-#for X in XLabels:
-#    Text = str(X)
-#    XLabelsText.append(Text)
-
-#YIterator = 0
-#for Y in YLabels:
-#    FocusArray1[YIterator].insert(0,Y)
-
-#    YIterator += 1
-
-
-#IP.WriteCsv2D_Data(FocusArray1,"D:/Microscope Data/AutoFocusOverSlideTest40umSteps/","FociArray.csv",XLabelsText)
-
-
-## NOTE:
-## THE SNAPIMAGE OPERATION PRODUCES A FLOAT-64 ARRAY THAT IMAGEJ CANNOT READ --> CONVERT TO FLOAT32 OR INT32
