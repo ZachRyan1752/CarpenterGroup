@@ -2,17 +2,17 @@ import GeneralLibrary as GL
 import Graphing as Gph
 import tifffile
 
-DataPaths = []
-DataPaths.append(GL.AskForFiles()[0])
-DataPaths.append(GL.AskForFiles()[0])
-DataPaths.append(GL.AskForFiles()[0])
+DataPaths = ["UltraquietGainCalibrationNoCorrection/ElectronReadoutNoise.tif","StandardGainCalibrationNoCorrection/ElectronReadoutNoise.tif","FastGainCalibrationNoCorrection/ElectronReadoutNoise.tif"]
+#DataPaths.append(GL.AskForFiles()[0])
+#DataPaths.append(GL.AskForFiles()[0])
+#DataPaths.append(GL.AskForFiles()[0])
 
 DataArray = []
-LabelArray = []
+LabelArray = ["Ultraquiet","Standard","Fast"]
 for Files in DataPaths:
     Data = tifffile.imread(Files).ravel()
     DataArray.append(Data)
-    LabelArray.append(Files)
+    #LabelArray.append(Files)
 
 Bins = 1000
 HistogramFormat = "step"
