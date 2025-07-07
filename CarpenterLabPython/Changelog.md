@@ -17,6 +17,9 @@
   - Allows the libraries to be access natively by python by using the command:
   - pip -e install .
 
+### __init__.py (Added)
+  - Allows the importation of the libraries from subfolders in the same parent directory:
+  - Read this for usage: https://www.geeksforgeeks.org/python/what-is-__init__-py-file-in-python/
 
 ## Version 2
 ### GeneratesCMOSCalibrationData.py (Updated)

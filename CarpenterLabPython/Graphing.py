@@ -53,7 +53,8 @@ def Histogram(DataArray, LabelArray, Bins, Type, **kwargs):
     for Data in DataArray:
         Axs.hist(Data, bins = Bins, histtype = Type, label = LabelArray[DataIndex])
         DataIndex += 1
-    
+
+    plt.legend(loc = 'upper right')    
     ## General code applied to all figures
     Fig.tight_layout()
 
