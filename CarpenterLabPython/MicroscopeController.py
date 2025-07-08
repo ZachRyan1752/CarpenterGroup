@@ -71,6 +71,8 @@ class ImagingSystem():
         CameraDevice = self.mmc.getCameraDevice()
         self.CameraDevice = CameraDevice
 
+        self.ShutterMode = "Toggle"
+
         if CenterStageOnStart == True:
             self.mmc.setXYPosition(70,70)
             self.mmc.setZPosition(70) ## Starts at the middle so it can focus up or down
@@ -88,13 +90,23 @@ class ImagingSystem():
 
         @self.mmc.mda.events.frameReady.connect ## When a MDA frameReady event occurs
         def on_frame(image: np.ndarray, event: useq.MDAEvent):
-            time.sleep(self.MovementDelay)
-            #print(self.MDApositions)
-            self.StartTimens = time.time_ns()
-            Movie = self.CollectMovie(self.ExposureTime, self.FPS, self.Duration, Position = self.MDApositions[0], **self.kwargspassthrough) ## Directly pass the movement coordinates to the collect movie function to reduce delay
-            tifffile.imwrite(self.MovieNamesTemp[0],Movie)
-            self.MovieNamesTemp.pop(0)
-            self.MDApositions.pop(0) ## Remove the position from the array, to prevent double moving
+            if self.FPS != 1:
+                time.sleep(self.MovementDelay)
+                #print(self.MDApositions)
+                self.StartTimens = time.time_ns()
+                self.Shutter(ShutterMode = "Set", ShutterState = True)
+                Movie = self.CollectMovie(self.ExposureTime, self.FPS, self.Duration, **self.kwargspassthrough) ## Directly pass the movement coordinates to the collect movie function to reduce delay
+                self.Shutter(ShutterMode = "Set", ShutterState = False)
+                tifffile.imwrite(self.MovieNamesTemp[0],Movie)
+                self.MovieNamesTemp.pop(0)
+
+            else:
+                time.sleep(self.MovementDelay)
+                self.Shutter(ShutterMode = "Set", ShutterState = True)
+                Movie = self.CollectImage(self.ExposureTime, **self.kwargspassthrough) ## Directly pass the movement coordinates to the collect movie function to reduce delay
+                self.Shutter(ShutterMode = "Set", ShutterState = False)
+                tifffile.imwrite(self.MovieNamesTemp[0],Movie)
+                self.MovieNamesTemp.pop(0)
 
     def GetStagePosition(self): ## Saves the new position internally, then outputs a list containing the X, Y, and Z positions of the stage
         XPos = self.mmc.getXPosition()
@@ -212,18 +224,45 @@ class ImagingSystem():
             tifffile.imwrite(ImageName, Image, description = OME_Xml, metadata = None)
             return Image, MetaData
 
-    def RunMDA(self, MDASequence):
-        self.FrameBuffer = []
-        @self.mmc.mda.events.frameReady.connect
-        def on_frame(image: np.ndarray, event: useq.MDAEvent):
-            self.FrameBuffer.append(image)
+    #def RunMDA(self, MDASequence):
+    #    self.FrameBuffer = []
+    #    @self.mmc.mda.events.frameReady.connect
+    #    def on_frame(image: np.ndarray, event: useq.MDAEvent):
+    #        self.FrameBuffer.append(image)
 
-        self.mmc.run_mda(MDASequence)
+    #    self.mmc.run_mda(MDASequence)
+
+    def Shutter(self,**kwargs):
+        ShutterMode = kwargs.get("ShutterMode",self.ShutterMode)
+        State = kwargs.get("ShutterState", True)
+
+        if ShutterMode == "Auto":
+            self.mmc.setAutoShutter(State)
+
+        if ShutterMode == "Set":
+            self.mmc.setShutterOpen(State)
+
+    def CollectImage(self, ExposureTime, **kwargs):
+        self.mmc.setExposure(ExposureTime) ## IN MILLISECONDS!!
+        
+        start = time.time()
+        self.mmc.snapImage()
+        stop = time.time()
+        delta = stop - start
+        print(delta, 1/delta)
+
+        ImageData = self.mmc.getTaggedImage()
+
+        Image = ImageData[0]
+        MetaData = ImageData[1]
+
+        return Image
 
     def CollectMovie(self, ExposureTime, FPS, Duration, **kwargs):
         
-        ROI = kwargs.get("ROI", [0,0,2304,2304])
-        StepTo = kwargs.get("Position", ["X","X","X"])
+        self.mmc.setExposure(ExposureTime)
+        #ROI = kwargs.get("ROI", [0,0,2304,2304])
+
 
         #ROI = kwargs.get("ROI", "Default")
         #if ROI != "Default": ## This takes almost 180 ms to execute, do it before we call to start the move to prevent delays
@@ -233,8 +272,8 @@ class ImagingSystem():
         #self.mmc.setExposure(ExposureTime) ## Set exposure time now to reduce delay
         FramesToCollect = Duration * FPS
 
-        if StepTo != ["X","X","X"]:
-            self.MoveStage(StepTo)
+        #if StepTo != ["X","X","X"]:
+        #    self.MoveStage(StepTo)
             
 
         
@@ -286,7 +325,7 @@ class ImagingSystem():
             self.mmc.setROI(ROI[0],ROI[1],ROI[2],ROI[3])
         
         self.MDApositions = kwargs.get("Positions", CurrentLocation)
-        self.MovementDelay = kwargs.get("Delay", 0)
+        self.MovementDelay = kwargs.get("Delay", 0.025)
 
         #self.MovieNamesTemp = []
         self.MovieNamesTemp = [*MovieNames]
@@ -295,8 +334,9 @@ class ImagingSystem():
 
         self.kwargspassthrough = kwargs
         DefaultSequence = MDASequence(
-            config = {"config": "HammamatsuCam", "exposure": 0.01}, ## Exposure time is set to zero, as we arent actually intending to collect any data at this time
-            time_plan = {"interval": 0.01, "loops": len(self.MDApositions)} ## Collect at every position
+            config = {"config": "HammamatsuCam", "exposure": 0.0}, ## Exposure time is set to zero, as we arent actually intending to collect any data at this time
+            time_plan = {"interval": 0.00, "loops": len(self.MDApositions)}, ## Collect at every position
+            #grid_plan = {'rows': 4, "columns": 4}
             #stage_positions = [*positions]
             #time_plan = {"interval": 1 / FPS, "loops": Duration * FPS},
             )
